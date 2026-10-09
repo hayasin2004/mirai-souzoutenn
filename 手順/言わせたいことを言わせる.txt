@@ -1,0 +1,1 @@
+ python voice_clone.py say "こんにちは僕の名前はAI拓す" --voice tako
