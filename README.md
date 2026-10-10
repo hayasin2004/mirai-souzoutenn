@@ -50,6 +50,29 @@ python voice_clone.py list
 python voice_clone.py delete tako
 ```
 
+## 機能ごとの説明
+
+機能ごとの詳しい使い方は `docs/` フォルダにあります。コマンドの一覧は `python voice_clone.py -h` で見られます。
+
+## フォルダ構成
+
+```
+voice_clone.py   … 入口（python voice_clone.py ○○ で実行）
+voice/           … 本体（各ファイルの役割は voice/__init__.py の先頭に書いてある）
+voice/commands/  … コマンド本体。ここに .py を足すと自動でコマンドが増える
+tests/           … 自動テスト（API には接続しない）
+docs/            … 機能ごとの説明
+```
+
+ブランチ同士でぶつからないように、機能を足すときは README ではなく `docs/` に説明ファイルを追加してください。
+
+## テストの実行
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
 ## 参考音声のコツ
 
 | 項目 | 推奨 |
