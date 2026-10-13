@@ -51,6 +51,47 @@ def clean(text: str) -> str:
     return text.strip()
 
 
+# ---------- 伸ばし棒 ----------
+# 「やったー」「すごーい」のように、ひらがなの後ろの「ー」「〜」は音声合成が苦手で、
+# 音程が崩れやすい。カタカナ語（ラーメン）は正しい書き方なのでそのままにする。
+_VOWEL_ROWS = {
+    "あ": "あかさたなはまやらわがざだばぱぁゃゎ",
+    "い": "いきしちにひみりぎじぢびぴぃ",
+    "う": "うくすつぬふむゆるぐずづぶぷぅゅゔ",
+    "え": "えけせてねへめれげぜでべぺぇ",
+    "お": "おこそとのほもよろをごぞどぼぽぉょ",
+}
+_VOWEL_OF = {kana: vowel for vowel, row in _VOWEL_ROWS.items() for kana in row}
+_HIRAGANA_LONG = re.compile(r"([ぁ-ゖ])[ー〜~]+")
+_OTHER_LONG = re.compile(r"(?<![ァ-ヶー])[ー〜~]{2,}")
+
+LONG_VOWEL_MODES = ("vowel", "keep", "drop")
+
+
+def fix_long_vowels(text: str, mode: str = "vowel") -> str:
+    """ひらがなの後ろの伸ばし棒を直す。
+
+    vowel … 母音に置き換える（やったー → やったあ、すごーい → すごおい）
+    keep  … そのまま（ただし「ーーー」は「ー」1つにまとめる）
+    drop  … 消す（やったー → やった）
+    """
+    if mode not in LONG_VOWEL_MODES:
+        raise ValueError(f"伸ばし棒の扱いは {LONG_VOWEL_MODES} のどれかです: {mode}")
+
+    def repl(m: re.Match) -> str:
+        kana = m.group(1)
+        if mode == "keep":
+            return kana + "ー"
+        if mode == "drop":
+            return kana
+        vowel = _VOWEL_OF.get(kana)
+        return kana + vowel if vowel else kana  # ん・っ の後ろは母音がないので消す
+
+    text = _HIRAGANA_LONG.sub(repl, text)
+    # カタカナ語以外で「ーー」「〜〜」と続くものは1つにする
+    return _OTHER_LONG.sub("ー" if mode == "keep" else "", text)
+
+
 _LEADING_MARK = re.compile(r"^(?:[-*+・]|\d+[.)])\s+")
 
 

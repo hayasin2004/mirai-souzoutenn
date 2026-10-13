@@ -2,6 +2,7 @@
 
   LLM の返答
     → clean（マークダウン・絵文字などを消す）
+    → 伸ばし棒を直す（やったー → やったあ）
     → 文ごとに区切る
     → 長い文に読点を足す
     → 感情タグを整える（または消す / 自動で付ける）
@@ -22,6 +23,7 @@ class StyleOptions:
     emotion_tags: bool = True  # False にすると感情タグを全部消す
     auto_emotion: bool = False  # タグのない文に、文末の ！ などから自動でタグを付ける
     add_pauses: bool = True  # 長い文に読点を足す
+    long_vowel: str = "vowel"  # ひらがなの後ろの伸ばし棒: vowel=母音に置換 / keep=そのまま / drop=消す
     max_run: int = 25  # 読点なしで続いてよい文字数
     accent_dict: AccentDict | None = None
     accent_dict_path: str | Path | None = None  # None なら accent_dict.json を探す
@@ -33,7 +35,8 @@ def style_for_speech(text: str, options: StyleOptions | None = None) -> list[str
     accent = opt.accent_dict or AccentDict.load(opt.accent_dict_path)
 
     sentences = []
-    for s in normalize.split_sentences(normalize.clean(text)):
+    cleaned = normalize.fix_long_vowels(normalize.clean(text), opt.long_vowel)
+    for s in normalize.split_sentences(cleaned):
         if opt.add_pauses:
             s = normalize.add_pauses(s, opt.max_run)
         if opt.emotion_tags:

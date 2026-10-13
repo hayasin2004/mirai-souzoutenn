@@ -172,3 +172,43 @@ def test_speak_sends_styled_text(tmp_project, fake_client, tmp_path):
     assert kw["text"] == "[happy] こんにちは！"
     assert kw["reference_id"] == "vid"
     assert out.exists()
+
+
+# ---------- 伸ばし棒 ----------
+
+@pytest.mark.parametrize(
+    "mode, expected",
+    [
+        ("vowel", "やったあ！すごおい。だよねえ。うん、そっかあ。ラーメン食べたいなあ。"),
+        ("keep", "やったー！すごーい。だよねー。うんー、そっかー。ラーメン食べたいなー。"),
+        ("drop", "やった！すごい。だよね。うん、そっか。ラーメン食べたいな。"),
+    ],
+)
+def test_fix_long_vowels(mode, expected):
+    src = "やったー！すごーい。だよね〜。うんー、そっかー。ラーメン食べたいなーーー。"
+    assert normalize.fix_long_vowels(src, mode) == expected
+
+
+def test_long_vowels_keep_katakana_words():
+    for mode in normalize.LONG_VOWEL_MODES:
+        assert normalize.fix_long_vowels("コーヒーとケーキとスーパー", mode) == "コーヒーとケーキとスーパー"
+
+
+def test_long_vowel_bad_mode():
+    with pytest.raises(ValueError):
+        normalize.fix_long_vowels("やったー", "nope")
+
+
+def test_pipeline_fixes_long_vowels_by_default():
+    assert style("[嬉しい]やったー！") == ["[happy] やったあ！"]
+    assert style("やったー！", long_vowel="keep") == ["やったー！"]
+
+
+def test_speak_compare_long_vowel_makes_three_files(tmp_project, fake_client, tmp_path):
+    out = tmp_path / "c.mp3"
+    main(["speak", "やったー！", "--voice", "vid", "-o", str(out), "--compare-long-vowel",
+          "--dict", str(tmp_path / "none.json")])
+    texts = [c.kwargs["text"] for c in fake_client.tts.convert.call_args_list]
+    assert texts == ["やったあ！", "やったー！", "やった！"]
+    for mode in ("vowel", "keep", "drop"):
+        assert (tmp_path / f"c_{mode}.mp3").exists()

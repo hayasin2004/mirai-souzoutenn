@@ -13,6 +13,7 @@ from fishaudio.utils import save
 from .. import audio_io, fish, registry
 from ..speech_style import StyleOptions, style_for_speech
 from ..speech_style.accent import AccentError, estimate
+from ..speech_style.normalize import LONG_VOWEL_MODES
 from .voices import add_tts_options
 
 
@@ -24,8 +25,9 @@ def _read_text(args) -> str:
     sys.exit("[エラー] 文章を指定するか、--file でテキストファイルを指定してください。")
 
 
-def _options(args) -> StyleOptions:
+def _options(args, long_vowel: str | None = None) -> StyleOptions:
     return StyleOptions(
+        long_vowel=long_vowel or args.long_vowel,
         emotion_tags=not args.no_emotion,
         auto_emotion=args.auto_emotion,
         add_pauses=not args.no_pauses,
@@ -33,8 +35,8 @@ def _options(args) -> StyleOptions:
     )
 
 
-def _style(args) -> list[str]:
-    opt = _options(args)
+def _style(args, long_vowel: str | None = None) -> list[str]:
+    opt = _options(args, long_vowel)
     try:
         sentences = style_for_speech(_read_text(args), opt)
     except AccentError as e:
@@ -49,29 +51,41 @@ def cmd_style(args) -> None:
         print(f"{i:2}: {s}")
 
 
-def cmd_speak(args) -> None:
-    sentences = _style(args)
+def _speak_once(client, args, long_vowel: str | None, path: Path) -> Path:
+    sentences = _style(args, long_vowel)
     if not sentences:
         sys.exit("[エラー] 読み上げる文章が空になりました。")
-    text = " ".join(sentences)
     print("読み上げる文章:")
     for s in sentences:
         print(f"  {s}")
-    client = fish.get_client()
     print(f"音声を生成中...（model={args.model}）")
     audio = fish.synthesize(
         client,
-        text,
+        " ".join(sentences),
         registry.resolve_id(args.voice),
         model=args.model,
         fmt=args.format,
         speed=args.speed,
         temperature=args.temperature,
     )
-    path = audio_io.new_output_path(args.out, args.format, prefix="speak")
     save(audio, str(path))
     print(f"保存しました: {path}")
-    audio_io.play_file(path, not args.no_play)
+    return path
+
+
+def cmd_speak(args) -> None:
+    client = fish.get_client()
+    if not args.compare_long_vowel:
+        path = audio_io.new_output_path(args.out, args.format, prefix="speak")
+        audio_io.play_file(_speak_once(client, args, None, path), not args.no_play)
+        return
+
+    # 伸ばし棒の扱いを3通り作って聴き比べる（再生はせず、ファイルだけ作る）
+    base = audio_io.new_output_path(args.out, args.format, prefix="speak")
+    for mode in LONG_VOWEL_MODES:
+        print(f"\n--- 伸ばし棒: {mode} ---")
+        _speak_once(client, args, mode, base.with_name(f"{base.stem}_{mode}{base.suffix}"))
+    print("\n3つのファイルを聴き比べて、一番自然なものを --long-vowel で指定してください。")
 
 
 def cmd_accent(args) -> None:
@@ -89,6 +103,8 @@ def _add_style_options(sp) -> None:
     sp.add_argument("--no-emotion", action="store_true", help="感情タグを全部消す")
     sp.add_argument("--auto-emotion", action="store_true", help="タグのない文に、文末の ！ などから自動でタグを付ける")
     sp.add_argument("--no-pauses", action="store_true", help="長い文に読点を足さない")
+    sp.add_argument("--long-vowel", default="vowel", choices=LONG_VOWEL_MODES,
+                    help="ひらがなの後ろの伸ばし棒: vowel=母音に置換（既定）/ keep=そのまま / drop=消す")
     sp.add_argument("--dict", help="アクセント辞書のパス（既定: accent_dict.json）")
 
 
@@ -100,6 +116,8 @@ def register(sub) -> None:
     sp = sub.add_parser("speak", help="文章を喋りやすく整えてから、作成した声で読み上げる")
     _add_style_options(sp)
     sp.add_argument("--voice", required=True, help="clone でつけた名前、または voice_id")
+    sp.add_argument("--compare-long-vowel", action="store_true",
+                    help="伸ばし棒の扱いを3通り（vowel/keep/drop）作って聴き比べる")
     add_tts_options(sp)
     sp.set_defaults(func=cmd_speak)
 
