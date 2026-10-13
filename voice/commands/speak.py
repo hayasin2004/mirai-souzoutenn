@@ -67,6 +67,7 @@ def _speak_once(client, args, long_vowel: str | None, path: Path) -> Path:
         fmt=args.format,
         speed=args.speed,
         temperature=args.temperature,
+        normalize=args.normalize,
     )
     save(audio, str(path))
     print(f"保存しました: {path}")

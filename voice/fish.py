@@ -53,8 +53,8 @@ def create_voice(
     )
 
 
-def _tts_config(fmt: str, temperature: float) -> TTSConfig:
-    return TTSConfig(format=fmt, latency="normal", temperature=temperature)
+def _tts_config(fmt: str, temperature: float, normalize: bool) -> TTSConfig:
+    return TTSConfig(format=fmt, latency="normal", temperature=temperature, normalize=normalize)
 
 
 def synthesize(
@@ -66,13 +66,14 @@ def synthesize(
     fmt: str = "mp3",
     speed: float | None = None,
     temperature: float = config.DEFAULT_TEMPERATURE,
+    normalize: bool = config.DEFAULT_NORMALIZE,
 ) -> bytes:
     """作成済みの声で読み上げる。"""
     return client.tts.convert(
         text=text,
         reference_id=voice_id,
         speed=speed,
-        config=_tts_config(fmt, temperature),
+        config=_tts_config(fmt, temperature, normalize),
         model=model,
     )
 
@@ -87,13 +88,14 @@ def synthesize_instant(
     fmt: str = "mp3",
     speed: float | None = None,
     temperature: float = config.DEFAULT_TEMPERATURE,
+    normalize: bool = config.DEFAULT_NORMALIZE,
 ) -> bytes:
     """声のモデルを作らずに、参考音声をその場で使って読み上げる。"""
     return client.tts.convert(
         text=text,
         references=[ReferenceAudio(audio=ref_audio, text=ref_text)],
         speed=speed,
-        config=_tts_config(fmt, temperature),
+        config=_tts_config(fmt, temperature, normalize),
         model=model,
     )
 

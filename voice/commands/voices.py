@@ -71,6 +71,7 @@ def cmd_say(args) -> None:
         fmt=args.format,
         speed=args.speed,
         temperature=args.temperature,
+        normalize=args.normalize,
     )
     _save_and_play(audio, args)
 
@@ -90,6 +91,7 @@ def cmd_instant(args) -> None:
         fmt=args.format,
         speed=args.speed,
         temperature=args.temperature,
+        normalize=args.normalize,
     )
     _save_and_play(audio, args)
 
@@ -127,6 +129,11 @@ def add_tts_options(sp) -> None:
         type=float,
         default=config.DEFAULT_TEMPERATURE,
         help=f"抑揚のばらつき（既定{config.DEFAULT_TEMPERATURE}、上げると感情豊か・不安定に）",
+    )
+    sp.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Fish Audio の文章正規化をオンにする（英語・中国語向け。日本語では既定オフ）",
     )
     sp.add_argument("-o", "--out", help="保存先（省略時は output/ に日時名で保存）")
     sp.add_argument("--no-play", action="store_true", help="生成後に自動再生しない")
