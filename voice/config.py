@@ -20,9 +20,9 @@ ASR_MODEL = "transcribe-1-pro"
 # 抑揚のばらつき。上げると感情豊かになるが不安定になる
 DEFAULT_TEMPERATURE = 0.7
 
-# Fish Audio の文章正規化（normalize）。公式では「英語と中国語向け」とされていて、
-# オンだと日本語が中国語っぽい読みになることがあるので、既定はオフにしている
-DEFAULT_NORMALIZE = False
+# Fish Audio の文章正規化（normalize）。公式の説明は「英語と中国語向け」だが、
+# 実際に試すとオフにすると日本語で読まれなくなったので、既定はオン（API の既定と同じ）
+DEFAULT_NORMALIZE = True
 
 SUPPORTED_EXT = {".wav", ".mp3", ".m4a", ".opus"}
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024

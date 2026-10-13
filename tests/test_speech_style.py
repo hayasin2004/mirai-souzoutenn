@@ -216,11 +216,11 @@ def test_speak_compare_long_vowel_makes_three_files(tmp_project, fake_client, tm
 
 # ---------- 文章正規化（normalize） ----------
 
-def test_normalize_is_off_by_default_for_japanese(tmp_project, fake_client, tmp_path):
-    """Fish の normalize は英語・中国語向けなので、日本語では既定オフ。"""
+def test_normalize_is_on_by_default(tmp_project, fake_client, tmp_path):
+    """オフにすると日本語で読まれなくなったので、既定はオン。"""
     main(["speak", "今日は2026年10月13日です。", "--voice", "vid", "-o", str(tmp_path / "a.mp3"),
           "--no-play", "--dict", str(tmp_path / "none.json")])
-    assert fake_client.tts.convert.call_args.kwargs["config"].normalize is False
-
-    main(["say", "テスト", "--voice", "vid", "-o", str(tmp_path / "b.mp3"), "--no-play", "--normalize"])
     assert fake_client.tts.convert.call_args.kwargs["config"].normalize is True
+
+    main(["say", "テスト", "--voice", "vid", "-o", str(tmp_path / "b.mp3"), "--no-play", "--no-normalize"])
+    assert fake_client.tts.convert.call_args.kwargs["config"].normalize is False
