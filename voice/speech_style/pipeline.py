@@ -7,6 +7,7 @@
     → 長い文に読点を足す
     → 感情タグを整える（または消す / 自動で付ける）
     → アクセント辞書で置き換える
+    → 漢字が長く続く部分を読み方に置き換える（中国語と間違われないように）
     → 文ごとのリスト
 """
 
@@ -14,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import emotion, normalize
+from . import emotion, normalize, reading
 from .accent import AccentDict
 
 
@@ -25,6 +26,8 @@ class StyleOptions:
     add_pauses: bool = True  # 長い文に読点を足す
     long_vowel: str = "vowel"  # ひらがなの後ろの伸ばし棒: vowel=母音に置換 / keep=そのまま / drop=消す
     max_run: int = 25  # 読点なしで続いてよい文字数
+    kanji: str = "hiragana"  # 漢字が長く続く部分: hiragana=ひらがなに / phoneme=アクセント指定タグに / off=そのまま
+    kanji_min_run: int = reading.DEFAULT_MIN_RUN  # 何文字続いたら置き換えるか
     accent_dict: AccentDict | None = None
     accent_dict_path: str | Path | None = None  # None なら accent_dict.json を探す
     log: list[str] = field(default_factory=list)  # 何を直したかの記録（確認用）
@@ -33,6 +36,10 @@ class StyleOptions:
 def style_for_speech(text: str, options: StyleOptions | None = None) -> list[str]:
     opt = options or StyleOptions()
     accent = opt.accent_dict or AccentDict.load(opt.accent_dict_path)
+
+    if opt.kanji != "off" and not reading.available():
+        opt.log.append("pyopenjtalk-plus が入っていないので、漢字の読み置き換えをしていません"
+                       "（pip install -r requirements-style.txt）")
 
     sentences = []
     cleaned = normalize.fix_long_vowels(normalize.clean(text), opt.long_vowel)
@@ -47,7 +54,8 @@ def style_for_speech(text: str, options: StyleOptions | None = None) -> list[str
                 s = emotion.auto_tag(s)
         else:
             s = emotion.strip_tags(s)
-        s = accent.apply(s)
+        s = accent.apply(s)  # 辞書に登録した単語が優先（この後の置き換えでは触らない）
+        s = reading.soften_kanji(s, opt.kanji, opt.kanji_min_run)
         if re.sub(r"[、。！？…\s]", "", emotion.strip_tags(s)):  # タグや記号だけの文は捨てる
             sentences.append(s)
     return sentences

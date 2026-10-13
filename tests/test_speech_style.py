@@ -211,7 +211,7 @@ def test_speak_compare_long_vowel_makes_three_files(tmp_project, fake_client, tm
     texts = [c.kwargs["text"] for c in fake_client.tts.convert.call_args_list]
     assert texts == ["やったあ！", "やったー！", "やった！"]
     for mode in ("vowel", "keep", "drop"):
-        assert (tmp_path / f"c_{mode}.mp3").exists()
+        assert (tmp_path / f"c_vowel-{mode}.mp3").exists()
 
 
 # ---------- 文章正規化（normalize） ----------
@@ -224,3 +224,50 @@ def test_normalize_is_on_by_default(tmp_project, fake_client, tmp_path):
 
     main(["say", "テスト", "--voice", "vid", "-o", str(tmp_path / "b.mp3"), "--no-play", "--no-normalize"])
     assert fake_client.tts.convert.call_args.kwargs["config"].normalize is False
+
+
+# ---------- 漢字が長く続く部分 ----------
+
+@needs_ojt
+def test_long_kanji_run_becomes_hiragana():
+    out = style("[驚き］吉野家の豚角煮丼好評販売中！！！！！")
+    assert out == ["[surprised] 吉野家のぶたかくにどんこうひょうはんばいちゅう！"]
+
+
+@needs_ojt
+def test_short_kanji_runs_are_kept():
+    assert style("本日は晴天なり。") == ["本日は晴天なり。"]  # 2文字ずつなので触らない
+    assert style("2026年10月13日です。") == ["2026年10月13日です。"]
+
+
+@needs_ojt
+def test_kanji_phoneme_mode_and_off():
+    out = style("豚角煮丼好評販売中！", kanji="phoneme")[0]
+    assert out.startswith("<|phoneme_start|>bu") and out.endswith("<|phoneme_end|>！")
+    assert style("豚角煮丼好評販売中！", kanji="off") == ["豚角煮丼好評販売中！"]
+
+
+@needs_ojt
+def test_dict_words_win_over_kanji_softening():
+    out = style("豚角煮丼好評販売中", accent_dict=AccentDict({"豚角煮丼": "bu0ta1ka1ku1ni1do1N1"}))[0]
+    assert out.startswith("<|phoneme_start|>bu0ta1ka1ku1ni1do1N1<|phoneme_end|>")
+    assert "こうひょうはんばいちゅう" in out
+
+
+def test_kanji_softening_skipped_without_pyopenjtalk(monkeypatch):
+    from voice.speech_style import reading
+    monkeypatch.setattr(reading, "reading_of", lambda run: None)
+    monkeypatch.setattr(reading, "available", lambda: False)
+    opt = StyleOptions(accent_dict=AccentDict())
+    assert style_for_speech("豚角煮丼好評販売中", opt) == ["豚角煮丼好評販売中"]
+    assert any("pyopenjtalk" in line for line in opt.log)
+
+
+def test_speak_compare_kanji_with_tries(tmp_project, fake_client, tmp_path):
+    out = tmp_path / "k.mp3"
+    main(["speak", "テストです", "--voice", "vid", "-o", str(out), "--compare-kanji", "--tries", "2",
+          "--dict", str(tmp_path / "none.json")])
+    assert fake_client.tts.convert.call_count == 6  # 3通り × 2回
+    for mode in ("hiragana", "phoneme", "off"):
+        for n in (1, 2):
+            assert (tmp_path / f"k_kanji-{mode}_{n}.mp3").exists()
