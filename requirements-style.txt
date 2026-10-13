@@ -1,0 +1,4 @@
+# アクセントの自動推定（accent コマンド、辞書の "auto"）を使うときに必要
+# Windows 用のビルド済みパッケージあり（Python 3.10〜3.14）
+-r requirements.txt
+pyopenjtalk-plus>=0.4.1.post9
