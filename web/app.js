@@ -21,6 +21,7 @@ const els = {
   chatMessages: $("chat-messages"),
   chatInput: $("chat-input"),
   sendChatBtn: $("send-chat-btn"),
+  enableTtsToggle: $("enable-tts-toggle"),
 
   // TTS読み上げ
   ttsText: $("tts-text"),
@@ -174,8 +175,11 @@ els.tabTts.addEventListener("click", () => {
 function setChatLoading(loading) {
   els.sendChatBtn.disabled = loading;
   els.sendChatBtn.classList.toggle("is-loading", loading);
-  els.sendChatBtn.querySelector(".btn-label").textContent = loading ? "思考＆発話中..." : "話す";
-  if (loading) els.nowPlaying.textContent = "考え中...";
+  const withTts = els.enableTtsToggle ? els.enableTtsToggle.checked : false;
+  els.sendChatBtn.querySelector(".btn-label").textContent = loading
+    ? (withTts ? "思考＆発話中..." : "思考中...")
+    : "話す";
+  if (loading) els.nowPlaying.textContent = withTts ? "考え中＆音声を生成中..." : "考え中...";
 }
 
 async function sendChat() {
@@ -188,7 +192,9 @@ async function sendChat() {
     return;
   }
 
-  ensureAudioGraph();
+  const enableTts = els.enableTtsToggle ? els.enableTtsToggle.checked : false;
+
+  if (enableTts) ensureAudioGraph();
   setChatLoading(true);
 
   // 1. ユーザーの吹き出しを追加
@@ -206,6 +212,7 @@ async function sendChat() {
         voice,
         speed: speed === 1 ? null : speed,
         history: chatHistory,
+        enable_tts: enableTts,
       }),
     });
 
@@ -233,8 +240,8 @@ async function sendChat() {
     if (item.url) {
       addHistory(item);
       playItem(item);
-    } else if (data.tts_error) {
-      showToast(data.tts_error);
+    } else {
+      els.nowPlaying.textContent = `市川 拓（たく）：${data.reply}`;
     }
   } catch (e) {
     showToast(e.message);
@@ -254,17 +261,60 @@ function appendChatBubble(role, text, audioItem = null) {
   p.textContent = text;
   bubble.append(p);
 
-  if (audioItem && audioItem.url) {
+  if (role === "model") {
     const meta = document.createElement("div");
     meta.className = "bubble-meta";
     const playBtn = document.createElement("button");
     playBtn.className = "bubble-play-btn";
     playBtn.type = "button";
-    playBtn.innerHTML = "▶ もう一度聴く";
-    playBtn.addEventListener("click", () => {
-      ensureAudioGraph();
-      playItem(audioItem);
-    });
+
+    if (audioItem && audioItem.url) {
+      playBtn.innerHTML = "▶ もう一度聴く";
+      playBtn.addEventListener("click", () => {
+        ensureAudioGraph();
+        playItem(audioItem);
+      });
+    } else {
+      // まだ音声がない場合：オンデマンドで生成
+      playBtn.innerHTML = "🔊 声で聴く";
+      playBtn.addEventListener("click", async () => {
+        ensureAudioGraph();
+        playBtn.disabled = true;
+        playBtn.innerHTML = "⏳ 生成中...";
+        try {
+          const speed = Number(els.speed.value);
+          const res = await fetch("/api/tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text,
+              voice: els.voice.value,
+              speed: speed === 1 ? null : speed,
+            }),
+          });
+          if (!res.ok) throw new Error("音声の生成に失敗しました");
+          const blob = await res.blob();
+          const item = {
+            id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+            text,
+            voice: els.voice.value,
+            url: URL.createObjectURL(blob),
+            filename: `tts_${timestampForFile(new Date())}.mp3`,
+            createdAt: new Date(),
+          };
+          addHistory(item);
+          playItem(item);
+          playBtn.disabled = false;
+          playBtn.innerHTML = "▶ もう一度聴く";
+          playBtn.onclick = () => playItem(item);
+        } catch (e) {
+          showToast(e.message);
+          playBtn.disabled = false;
+          playBtn.innerHTML = "🔊 声で聴く";
+        }
+      });
+    }
+
     meta.append(playBtn);
     bubble.append(meta);
   }

@@ -74,6 +74,14 @@
           </div>
         </div>
 
+        <div class="chat-options-bar">
+          <label class="toggle-label" title="ONにすると返答時に自動で音声を生成します（混雑時は数秒かかります）">
+            <input id="enable-tts-toggle" type="checkbox">
+            <span class="toggle-text">🔊 音声も自動生成する</span>
+          </label>
+          <span class="mode-badge-hint">⚡ OFFなら1秒で爆速返答！</span>
+        </div>
+
         <div class="chat-input-bar">
           <textarea id="chat-input" rows="2" placeholder="メッセージを入力... (Enterで送信、Shift+Enterで改行)"></textarea>
           <button id="send-chat-btn" class="btn-primary" type="button">

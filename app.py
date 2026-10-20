@@ -204,6 +204,7 @@ def api_chat():
     voice = str(data.get("voice", "")).strip()
     history = data.get("history", [])  # [{"role": "user"|"model", "text": "..."}]
     custom_persona = data.get("persona")
+    enable_tts = bool(data.get("enable_tts", False))  # デフォルトは音声なし（超高速テキスト対話）
 
     if not message:
         return error("メッセージを入力してください。", 400)
@@ -257,6 +258,15 @@ def api_chat():
     clean_reply = clean_tts_text(reply_raw)
     if not clean_reply:
         clean_reply = "うまく答えられなかったよ。もう一度聞いてみて！"
+
+    # 音声合成がOFFの場合はここで即座にテキストのみを返す（所要時間: 1秒以内）
+    if not enable_tts:
+        return jsonify(
+            reply=clean_reply,
+            raw_reply=reply_raw,
+            audio_base64=None,
+            voice=voice,
+        )
 
     # 2. Fish Audio で音声合成（balanced で高速化）
     try:

@@ -394,8 +394,37 @@ input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
   to { opacity: 1; transform: none; }
 }
 
+.chat-options-bar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 4px;
+}
+.toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-label input[type="checkbox"] {
+  accent-color: var(--accent-1);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.mode-badge-hint {
+  font-size: 0.76rem;
+  color: var(--accent-2);
+  font-weight: 500;
+}
+
 .chat-input-bar {
-  margin-top: 14px;
+  margin-top: 10px;
   display: flex;
   gap: 10px;
 }
