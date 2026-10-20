@@ -246,15 +246,30 @@ def api_chat():
         # 高速応答のため短文指定を追加
         speed_instruction = f"{system_prompt}\n\n【最重要ルール】音声合成のため、必ず1文または2文（50文字以内）の超短文で返答してください。"
 
-        response = gemini_client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=speed_instruction,
-                temperature=0.7,
-                max_output_tokens=100,
-            ),
-        )
+        # 最速・低遅延の flash-lite モデルを使用（混雑時フォールバック付き）
+        candidate_models = ["gemini-3.5-flash-lite", "gemini-flash-latest"]
+        response = None
+        last_exc = None
+        for model_name in candidate_models:
+            try:
+                response = gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=speed_instruction,
+                        temperature=0.7,
+                        max_output_tokens=100,
+                    ),
+                )
+                if response and response.text:
+                    break
+            except Exception as err:
+                last_exc = err
+                continue
+
+        if not response or not response.text:
+            raise last_exc if last_exc else Exception("Geminiからの返答が取得できませんでした")
+
         reply_raw = response.text or ""
     except Exception as e:
         return error(f"Gemini API エラー: {str(e)}", 502)
