@@ -166,7 +166,7 @@ def api_tts():
             text=text,
             reference_id=resolve_voice_id(voice),
             speed=speed,
-            config=TTSConfig(format="mp3", latency="normal"),
+            config=TTSConfig(format="mp3", latency="balanced"),
             model=DEFAULT_MODEL,
         )
     except AuthenticationError:
@@ -238,13 +238,16 @@ def api_chat():
         # 今回のユーザー発言を追加
         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message)]))
 
+        # 高速応答のため短文指定を追加
+        speed_instruction = f"{system_prompt}\n\n【最重要ルール】音声合成のため、必ず1文または2文（50文字以内）の超短文で返答してください。"
+
         response = gemini_client.models.generate_content(
             model="gemini-3.8-flash",
             contents=contents,
             config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.8,
-                max_output_tokens=300,
+                system_instruction=speed_instruction,
+                temperature=0.7,
+                max_output_tokens=100,
             ),
         )
         reply_raw = response.text or ""
@@ -255,14 +258,14 @@ def api_chat():
     if not clean_reply:
         clean_reply = "うまく答えられなかったよ。もう一度聞いてみて！"
 
-    # 2. Fish Audio で音声合成
+    # 2. Fish Audio で音声合成（balanced で高速化）
     try:
         fish_client = get_fish_client()
         audio = fish_client.tts.convert(
             text=clean_reply,
             reference_id=resolve_voice_id(voice),
             speed=speed,
-            config=TTSConfig(format="mp3", latency="normal"),
+            config=TTSConfig(format="mp3", latency="balanced"),
             model=DEFAULT_MODEL,
         )
         if not isinstance(audio, bytes):
