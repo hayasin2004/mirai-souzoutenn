@@ -221,6 +221,13 @@ async function sendChat() {
       throw new Error(data.error || `HTTP ${res.status}`);
     }
 
+    // デバッグ用コンソール出力
+    if (data.timing) {
+      console.log(`[DEBUG] ⏱️ 生成所要時間: 合計 ${data.timing.total_sec}秒 (Gemini: ${data.timing.gemini_sec}秒, TTS: ${data.timing.tts_sec}秒, TTS有効: ${data.timing.enable_tts})`);
+    } else {
+      console.log("[DEBUG] レスポンス:", data);
+    }
+
     // 会話履歴を更新
     chatHistory.push({ role: "user", text: message });
     chatHistory.push({ role: "model", text: data.reply });
@@ -235,7 +242,7 @@ async function sendChat() {
       createdAt: new Date(),
     };
 
-    appendChatBubble("model", data.reply, item);
+    appendChatBubble("model", data.reply, item, data.timing);
 
     if (item.url) {
       addHistory(item);
@@ -253,7 +260,7 @@ async function sendChat() {
   }
 }
 
-function appendChatBubble(role, text, audioItem = null) {
+function appendChatBubble(role, text, audioItem = null, timing = null) {
   const bubble = document.createElement("div");
   bubble.className = `chat-bubble chat-bubble-${role === "user" ? "user" : "ai"}`;
   
@@ -264,6 +271,15 @@ function appendChatBubble(role, text, audioItem = null) {
   if (role === "model") {
     const meta = document.createElement("div");
     meta.className = "bubble-meta";
+
+    if (timing) {
+      const timingBadge = document.createElement("span");
+      timingBadge.className = "bubble-timing";
+      timingBadge.title = `Gemini: ${timing.gemini_sec}s / TTS: ${timing.tts_sec}s`;
+      timingBadge.textContent = `⏱️ ${timing.total_sec}s`;
+      meta.append(timingBadge);
+    }
+
     const playBtn = document.createElement("button");
     playBtn.className = "bubble-play-btn";
     playBtn.type = "button";

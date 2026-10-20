@@ -387,6 +387,15 @@ input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
   padding: 2px 6px;
   border-radius: 4px;
 }
+.bubble-timing {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: hsl(232 30% 12% / 0.6);
+}
+
 .bubble-play-btn:hover { background: hsl(190 95% 58% / 0.15); }
 
 @keyframes pop {

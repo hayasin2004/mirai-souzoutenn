@@ -12,6 +12,7 @@ import base64
 import os
 import re
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -218,10 +219,13 @@ def api_chat():
         except (TypeError, ValueError):
             speed = None
 
+    t_start = time.time()
+
     # 人格プロンプト
     system_prompt = custom_persona if custom_persona else load_persona_text()
 
     # 1. Gemini で回答を生成
+    t_gemini_start = time.time()
     try:
         from google import genai
         from google.genai import types
@@ -255,20 +259,36 @@ def api_chat():
     except Exception as e:
         return error(f"Gemini API エラー: {str(e)}", 502)
 
+    gemini_sec = round(time.time() - t_gemini_start, 2)
     clean_reply = clean_tts_text(reply_raw)
     if not clean_reply:
         clean_reply = "うまく答えられなかったよ。もう一度聞いてみて！"
 
-    # 音声合成がOFFの場合はここで即座にテキストのみを返す（所要時間: 1秒以内）
+    # 音声合成がOFFの場合はここで即座にテキストのみを返す
     if not enable_tts:
+        total_sec = round(time.time() - t_start, 2)
+        print(f"\n[DEBUG] ========================================", flush=True)
+        print(f"[DEBUG] メッセージ       : \"{message}\"", flush=True)
+        print(f"[DEBUG] 音声合成(TTS)    : OFF（テキストのみ対話）", flush=True)
+        print(f"[DEBUG] ⚡ Gemini返答時間: {gemini_sec:.2f} 秒", flush=True)
+        print(f"[DEBUG] ⏱️ 合計所要時間   : {total_sec:.2f} 秒", flush=True)
+        print(f"[DEBUG] 返答内容         : \"{clean_reply}\"", flush=True)
+        print(f"[DEBUG] ========================================\n", flush=True)
         return jsonify(
             reply=clean_reply,
             raw_reply=reply_raw,
             audio_base64=None,
             voice=voice,
+            timing={
+                "gemini_sec": gemini_sec,
+                "tts_sec": 0,
+                "total_sec": total_sec,
+                "enable_tts": False,
+            },
         )
 
     # 2. Fish Audio で音声合成（balanced で高速化）
+    t_tts_start = time.time()
     try:
         fish_client = get_fish_client()
         audio = fish_client.tts.convert(
@@ -281,14 +301,34 @@ def api_chat():
         if not isinstance(audio, bytes):
             audio = b"".join(audio)
     except Exception as e:
-        # 音声合成が失敗してもテキストは返す
+        tts_sec = round(time.time() - t_tts_start, 2)
+        total_sec = round(time.time() - t_start, 2)
+        print(f"[DEBUG] TTS生成失敗 ({tts_sec:.2f}秒): {e}", flush=True)
         return jsonify(
             reply=clean_reply,
             raw_reply=reply_raw,
             audio_base64=None,
             voice=voice,
             tts_error=f"音声の生成に失敗しました: {str(e)}",
+            timing={
+                "gemini_sec": gemini_sec,
+                "tts_sec": tts_sec,
+                "total_sec": total_sec,
+                "enable_tts": True,
+            },
         )
+
+    tts_sec = round(time.time() - t_tts_start, 2)
+    total_sec = round(time.time() - t_start, 2)
+
+    print(f"\n[DEBUG] ========================================", flush=True)
+    print(f"[DEBUG] メッセージ          : \"{message}\"", flush=True)
+    print(f"[DEBUG] 音声合成(TTS)       : ON（音声あり）", flush=True)
+    print(f"[DEBUG] ⚡ Gemini返答時間   : {gemini_sec:.2f} 秒", flush=True)
+    print(f"[DEBUG] 🔊 FishAudio(TTS)   : {tts_sec:.2f} 秒", flush=True)
+    print(f"[DEBUG] ⏱️ 合計所要時間      : {total_sec:.2f} 秒", flush=True)
+    print(f"[DEBUG] 返答内容            : \"{clean_reply}\"", flush=True)
+    print(f"[DEBUG] ========================================\n", flush=True)
 
     b64_audio = base64.b64encode(audio).decode("ascii")
     return jsonify(
@@ -296,6 +336,12 @@ def api_chat():
         raw_reply=reply_raw,
         audio_base64=b64_audio,
         voice=voice,
+        timing={
+            "gemini_sec": gemini_sec,
+            "tts_sec": tts_sec,
+            "total_sec": total_sec,
+            "enable_tts": True,
+        },
     )
 
 
