@@ -50,6 +50,17 @@ python voice_clone.py list
 python voice_clone.py delete tako
 ```
 
+## Web 画面で読み上げる
+
+声を `clone` で登録したあと、ブラウザから文字を入力してその場で読み上げられます（mp3 はファイル保存されず、画面で直接再生されます）。
+
+```bash
+python app.py          # http://127.0.0.1:5000 が自動で開きます（終了は Ctrl+C）
+```
+
+- 文章を入力して「読み上げる」（または `Ctrl + Enter`）→ すぐ再生
+- 声・速さを画面で選択、履歴から再再生や mp3 ダウンロードも可能
+
 ## 参考音声のコツ
 
 | 項目 | 推奨 |

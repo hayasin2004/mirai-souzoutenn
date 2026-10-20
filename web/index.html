@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mirai Voice Studio｜クローン音声でその場で読み上げ</title>
+  <meta name="description" content="文章を入力するだけで、クローンした自分の声でその場で読み上げる音声合成スタジオ。">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="bg-orb orb-1" aria-hidden="true"></div>
+  <div class="bg-orb orb-2" aria-hidden="true"></div>
+  <div class="bg-orb orb-3" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </span>
+      <div>
+        <h1>Mirai Voice Studio</h1>
+        <p class="tagline">文字を打つだけで、あなたの声がその場で話します</p>
+      </div>
+    </div>
+    <span id="model-badge" class="badge">model: —</span>
+  </header>
+
+  <main class="layout">
+    <section class="card composer" aria-labelledby="composer-title">
+      <h2 id="composer-title" class="card-title">読み上げる文章</h2>
+
+      <div class="controls-row">
+        <label class="field">
+          <span class="field-label">声</span>
+          <div class="select-wrap">
+            <select id="voice-select" aria-label="声を選択">
+              <option value="">読み込み中...</option>
+            </select>
+          </div>
+        </label>
+
+        <label class="field speed-field">
+          <span class="field-label">速さ <output id="speed-value" for="speed-range">1.0x</output></span>
+          <input id="speed-range" type="range" min="0.5" max="2" step="0.1" value="1">
+        </label>
+      </div>
+
+      <div class="textarea-wrap">
+        <textarea id="tts-text" rows="6" maxlength="1000"
+          placeholder="ここに読み上げたい文章を入力してください。&#10;例：今日はいい天気ですね。散歩に行きましょう。"></textarea>
+        <span id="char-count" class="char-count">0 / 1000</span>
+      </div>
+
+      <div class="actions">
+        <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> で読み上げ</span>
+        <button id="speak-btn" class="btn-primary" type="button">
+          <span class="btn-spinner" aria-hidden="true"></span>
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          <span class="btn-label">読み上げる</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="card player" aria-labelledby="player-title">
+      <h2 id="player-title" class="card-title">再生</h2>
+      <div class="visualizer-wrap">
+        <canvas id="visualizer" aria-hidden="true"></canvas>
+        <p id="now-playing" class="now-playing">文章を入力して「読み上げる」を押してください</p>
+      </div>
+
+      <div class="transport">
+        <button id="play-btn" class="btn-round" type="button" aria-label="再生 / 一時停止" disabled>
+          <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+        </button>
+        <span id="time-current" class="time">0:00</span>
+        <input id="seek-range" class="seek" type="range" min="0" max="0" step="0.01" value="0" aria-label="再生位置" disabled>
+        <span id="time-total" class="time">0:00</span>
+        <a id="download-link" class="btn-ghost is-disabled" aria-disabled="true" title="mp3 をダウンロード">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+        </a>
+      </div>
+      <audio id="audio" preload="auto"></audio>
+    </section>
+
+    <section class="card history" aria-labelledby="history-title">
+      <div class="history-head">
+        <h2 id="history-title" class="card-title">履歴</h2>
+        <button id="clear-history-btn" class="btn-text" type="button">クリア</button>
+      </div>
+      <ul id="history-list" class="history-list">
+        <li class="history-empty">まだ履歴はありません</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    自分の声、または本人の同意を得た声だけを使ってください。
+  </footer>
+
+  <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
