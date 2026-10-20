@@ -3,13 +3,31 @@
 const $ = (id) => document.getElementById(id);
 
 const els = {
+  // ナビ & バッジ
+  tabChat: $("tab-chat"),
+  tabTts: $("tab-tts"),
+  panelChat: $("panel-chat"),
+  panelTts: $("panel-tts"),
+  modelBadge: $("model-badge"),
+  geminiBadge: $("gemini-badge"),
+  personaBtn: $("persona-btn"),
+
+  // 共通コントロール
   voice: $("voice-select"),
   speed: $("speed-range"),
   speedValue: $("speed-value"),
-  text: $("tts-text"),
+
+  // チャット
+  chatMessages: $("chat-messages"),
+  chatInput: $("chat-input"),
+  sendChatBtn: $("send-chat-btn"),
+
+  // TTS読み上げ
+  ttsText: $("tts-text"),
   charCount: $("char-count"),
   speakBtn: $("speak-btn"),
-  modelBadge: $("model-badge"),
+
+  // プレイヤー & 波形
   audio: $("audio"),
   canvas: $("visualizer"),
   nowPlaying: $("now-playing"),
@@ -18,16 +36,27 @@ const els = {
   timeCurrent: $("time-current"),
   timeTotal: $("time-total"),
   download: $("download-link"),
+
+  // 履歴
   historyList: $("history-list"),
   clearHistory: $("clear-history-btn"),
+
+  // 人格モーダル
+  dialog: $("persona-dialog"),
+  closeDialogBtn: $("close-dialog-btn"),
+  personaTextarea: $("persona-textarea"),
+  savePersonaBtn: $("save-persona-btn"),
+  personaStatus: $("persona-status"),
+
   toast: $("toast"),
 };
 
 const MAX_HISTORY = 20;
 const STORAGE_KEY = "mirai-voice:last-voice";
 
-let maxLength = Number(els.text.maxLength) || 1000;
+let maxLength = 1000;
 let history = []; // { id, text, voice, url, filename, createdAt }
+let chatHistory = []; // { role: "user" | "model", text: string }
 let activeId = null;
 let audioCtx = null;
 let analyser = null;
@@ -59,22 +88,43 @@ function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("is-visible");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => els.toast.classList.remove("is-visible"), 5000);
+  toastTimer = setTimeout(() => els.toast.classList.remove("is-visible"), 6000);
 }
 
-/* ---------- 声一覧 ---------- */
+function b64ToBlobUrl(b64, mimeType = "audio/mpeg") {
+  const byteChars = atob(b64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) {
+    byteNumbers[i] = byteChars.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  const blob = new Blob([byteArray], { type: mimeType });
+  return URL.createObjectURL(blob);
+}
+
+/* ---------- 初期設定・ステータス ---------- */
+
+async function loadConfig() {
+  try {
+    const res = await fetch("/api/config");
+    const data = await res.json();
+    els.modelBadge.textContent = `TTS: ${data.model}`;
+    if (data.has_gemini_key) {
+      els.geminiBadge.textContent = "Gemini: 準備完了";
+      els.geminiBadge.className = "badge badge-ok";
+    } else {
+      els.geminiBadge.textContent = "Gemini: キー未設定";
+      els.geminiBadge.className = "badge badge-warn";
+    }
+  } catch (e) {
+    console.warn("Config load failed", e);
+  }
+}
 
 async function loadVoices() {
   try {
     const res = await fetch("/api/voices");
     const data = await res.json();
-    els.modelBadge.textContent = `model: ${data.model}`;
-    if (data.max_length) {
-      maxLength = data.max_length;
-      els.text.maxLength = maxLength;
-      updateCharCount();
-    }
-
     els.voice.innerHTML = "";
     if (!data.voices.length) {
       els.voice.innerHTML = '<option value="">声が未登録です</option>';
@@ -95,21 +145,149 @@ async function loadVoices() {
   }
 }
 
-/* ---------- 読み上げ ---------- */
+/* ---------- タブ切り替え ---------- */
 
-function setLoading(loading) {
+els.tabChat.addEventListener("click", () => {
+  els.tabChat.classList.add("is-active");
+  els.tabChat.setAttribute("aria-selected", "true");
+  els.tabTts.classList.remove("is-active");
+  els.tabTts.setAttribute("aria-selected", "false");
+
+  els.panelChat.classList.remove("is-hidden");
+  els.panelTts.classList.add("is-hidden");
+  els.chatInput.focus();
+});
+
+els.tabTts.addEventListener("click", () => {
+  els.tabTts.classList.add("is-active");
+  els.tabTts.setAttribute("aria-selected", "true");
+  els.tabChat.classList.remove("is-active");
+  els.tabChat.setAttribute("aria-selected", "false");
+
+  els.panelTts.classList.remove("is-hidden");
+  els.panelChat.classList.add("is-hidden");
+  els.ttsText.focus();
+});
+
+/* ---------- AI対話 (Chat) ---------- */
+
+function setChatLoading(loading) {
+  els.sendChatBtn.disabled = loading;
+  els.sendChatBtn.classList.toggle("is-loading", loading);
+  els.sendChatBtn.querySelector(".btn-label").textContent = loading ? "思考＆発話中..." : "話す";
+  if (loading) els.nowPlaying.textContent = "考え中...";
+}
+
+async function sendChat() {
+  const message = els.chatInput.value.trim();
+  const voice = els.voice.value;
+
+  if (!message) return;
+  if (!voice) {
+    showToast("声を選択してください。");
+    return;
+  }
+
+  ensureAudioGraph();
+  setChatLoading(true);
+
+  // 1. ユーザーの吹き出しを追加
+  appendChatBubble("user", message);
+  els.chatInput.value = "";
+
+  const speed = Number(els.speed.value);
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        voice,
+        speed: speed === 1 ? null : speed,
+        history: chatHistory,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    // 会話履歴を更新
+    chatHistory.push({ role: "user", text: message });
+    chatHistory.push({ role: "model", text: data.reply });
+
+    // 2. AIの吹き出しを追加
+    const item = {
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+      text: data.reply,
+      voice: data.voice,
+      url: data.audio_base64 ? b64ToBlobUrl(data.audio_base64) : null,
+      filename: `tts_${timestampForFile(new Date())}.mp3`,
+      createdAt: new Date(),
+    };
+
+    appendChatBubble("model", data.reply, item);
+
+    if (item.url) {
+      addHistory(item);
+      playItem(item);
+    } else if (data.tts_error) {
+      showToast(data.tts_error);
+    }
+  } catch (e) {
+    showToast(e.message);
+    appendChatBubble("model", `（エラー: ${e.message}）`);
+    els.nowPlaying.textContent = "対話エラー";
+  } finally {
+    setChatLoading(false);
+    els.chatInput.focus();
+  }
+}
+
+function appendChatBubble(role, text, audioItem = null) {
+  const bubble = document.createElement("div");
+  bubble.className = `chat-bubble chat-bubble-${role === "user" ? "user" : "ai"}`;
+  
+  const p = document.createElement("p");
+  p.textContent = text;
+  bubble.append(p);
+
+  if (audioItem && audioItem.url) {
+    const meta = document.createElement("div");
+    meta.className = "bubble-meta";
+    const playBtn = document.createElement("button");
+    playBtn.className = "bubble-play-btn";
+    playBtn.type = "button";
+    playBtn.innerHTML = "▶ もう一度聴く";
+    playBtn.addEventListener("click", () => {
+      ensureAudioGraph();
+      playItem(audioItem);
+    });
+    meta.append(playBtn);
+    bubble.append(meta);
+  }
+
+  els.chatMessages.append(bubble);
+  els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+}
+
+/* ---------- テキスト読み上げ (TTS) ---------- */
+
+function setTtsLoading(loading) {
   els.speakBtn.disabled = loading;
   els.speakBtn.classList.toggle("is-loading", loading);
   els.speakBtn.querySelector(".btn-label").textContent = loading ? "生成中..." : "読み上げる";
   if (loading) els.nowPlaying.textContent = "音声を生成しています...";
 }
 
-async function speak() {
-  const text = els.text.value.trim();
+async function speakTts() {
+  const text = els.ttsText.value.trim();
   const voice = els.voice.value;
   if (!text) {
     showToast("読み上げる文章を入力してください。");
-    els.text.focus();
+    els.ttsText.focus();
     return;
   }
   if (!voice) {
@@ -117,8 +295,8 @@ async function speak() {
     return;
   }
 
-  ensureAudioGraph(); // クリック直後に AudioContext を作っておく（自動再生制限対策）
-  setLoading(true);
+  ensureAudioGraph();
+  setTtsLoading(true);
 
   const speed = Number(els.speed.value);
   try {
@@ -147,11 +325,11 @@ async function speak() {
     els.nowPlaying.textContent = "生成に失敗しました";
     showToast(e.message);
   } finally {
-    setLoading(false);
+    setTtsLoading(false);
   }
 }
 
-/* ---------- 再生 ---------- */
+/* ---------- 再生コントロール ---------- */
 
 function ensureAudioGraph() {
   if (!audioCtx) {
@@ -217,12 +395,13 @@ els.seek.addEventListener("change", () => {
 function addHistory(item) {
   history.unshift(item);
   while (history.length > MAX_HISTORY) URL.revokeObjectURL(history.pop().url);
+  renderHistory();
 }
 
 function renderHistory() {
   els.historyList.innerHTML = "";
   if (!history.length) {
-    els.historyList.innerHTML = '<li class="history-empty">まだ履歴はありません</li>';
+    els.historyList.innerHTML = '<li class="history-empty">まだ発話はありません</li>';
     return;
   }
   for (const item of history) {
@@ -275,7 +454,7 @@ function clearHistory() {
   els.timeTotal.textContent = "0:00";
   els.download.classList.add("is-disabled");
   els.download.removeAttribute("href");
-  els.nowPlaying.textContent = "文章を入力して「読み上げる」を押してください";
+  els.nowPlaying.textContent = "メッセージを送信するか文章を読み上げてください";
   renderHistory();
 }
 
@@ -312,7 +491,6 @@ function draw(t) {
   for (let i = 0; i < bars; i++) {
     let level;
     if (playing) {
-      // 低〜中域を中心に使う（声の帯域）
       const idx = Math.floor((i / bars) * freqData.length * 0.7);
       level = freqData[idx] / 255;
     } else {
@@ -338,29 +516,79 @@ function roundRect(x, y, w, h, r) {
   ctx2d.fill();
 }
 
-/* ---------- 入力まわり ---------- */
+/* ---------- 人格設定モーダル ---------- */
 
-function updateCharCount() {
-  const len = els.text.value.length;
-  els.charCount.textContent = `${len} / ${maxLength}`;
-  els.charCount.classList.toggle("is-near", len > maxLength * 0.9);
+async function openPersonaDialog() {
+  els.personaStatus.textContent = "";
+  try {
+    const res = await fetch("/api/persona");
+    const data = await res.json();
+    els.personaTextarea.value = data.prompt;
+  } catch (e) {
+    els.personaTextarea.value = "読み込みに失敗しました";
+  }
+  els.dialog.showModal();
 }
+
+async function savePersona() {
+  const prompt = els.personaTextarea.value.trim();
+  if (!prompt) return;
+  els.savePersonaBtn.disabled = true;
+  try {
+    const res = await fetch("/api/persona", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    if (res.ok) {
+      els.personaStatus.textContent = "✓ 保存しました";
+      setTimeout(() => els.dialog.close(), 1000);
+    } else {
+      showToast("保存に失敗しました");
+    }
+  } catch (e) {
+    showToast("保存エラー: " + e.message);
+  } finally {
+    els.savePersonaBtn.disabled = false;
+  }
+}
+
+els.personaBtn.addEventListener("click", openPersonaDialog);
+els.closeDialogBtn.addEventListener("click", () => els.dialog.close());
+els.savePersonaBtn.addEventListener("click", savePersona);
+
+/* ---------- イベントリスナー ---------- */
 
 function updateSpeed() {
   els.speedValue.textContent = `${Number(els.speed.value).toFixed(1)}x`;
   setRangeFill(els.speed);
 }
 
-els.text.addEventListener("input", updateCharCount);
-els.text.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+function updateCharCount() {
+  const len = els.ttsText.value.length;
+  els.charCount.textContent = `${len} / ${maxLength}`;
+  els.charCount.classList.toggle("is-near", len > maxLength * 0.9);
+}
+
+els.chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    if (!els.speakBtn.disabled) speak();
+    if (!els.sendChatBtn.disabled) sendChat();
   }
 });
+els.sendChatBtn.addEventListener("click", sendChat);
+
+els.ttsText.addEventListener("input", updateCharCount);
+els.ttsText.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    e.preventDefault();
+    if (!els.speakBtn.disabled) speakTts();
+  }
+});
+els.speakBtn.addEventListener("click", speakTts);
+
 els.speed.addEventListener("input", updateSpeed);
 els.voice.addEventListener("change", () => localStorage.setItem(STORAGE_KEY, els.voice.value));
-els.speakBtn.addEventListener("click", speak);
 els.playBtn.addEventListener("click", togglePlay);
 els.clearHistory.addEventListener("click", clearHistory);
 window.addEventListener("resize", resizeCanvas);
@@ -372,5 +600,6 @@ updateCharCount();
 setRangeFill(els.seek);
 resizeCanvas();
 requestAnimationFrame(draw);
+loadConfig();
 loadVoices();
-els.text.focus();
+els.chatInput.focus();

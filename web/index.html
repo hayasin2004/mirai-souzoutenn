@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mirai Voice Studio｜クローン音声でその場で読み上げ</title>
-  <meta name="description" content="文章を入力するだけで、クローンした自分の声でその場で読み上げる音声合成スタジオ。">
+  <title>Mirai Voice Studio｜AI人格クローン × 音声対話</title>
+  <meta name="description" content="AIに人格をコピーし、クローンした声でリアルタイムに音声対話できるスタジオ。">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
@@ -22,19 +22,37 @@
       </span>
       <div>
         <h1>Mirai Voice Studio</h1>
-        <p class="tagline">文字を打つだけで、あなたの声がその場で話します</p>
+        <p class="tagline">AIが人格を持って、あなたの声で話しかけてきます</p>
       </div>
     </div>
-    <span id="model-badge" class="badge">model: —</span>
+    <div class="header-actions">
+      <button id="persona-btn" class="btn-subtle" type="button">
+        ⚙ 人格プロンプト編集
+      </button>
+      <span id="gemini-badge" class="badge badge-warn">Gemini: 確認中...</span>
+      <span id="model-badge" class="badge">TTS: s2.1-pro-free</span>
+    </div>
   </header>
 
-  <main class="layout">
-    <section class="card composer" aria-labelledby="composer-title">
-      <h2 id="composer-title" class="card-title">読み上げる文章</h2>
+  <!-- モード切替タブ -->
+  <nav class="mode-tabs-wrap">
+    <div class="mode-tabs" role="tablist">
+      <button id="tab-chat" class="tab-btn is-active" role="tab" aria-selected="true" type="button">
+        💬 AI人格と会話（Gemini対話）
+      </button>
+      <button id="tab-tts" class="tab-btn" role="tab" aria-selected="false" type="button">
+        📝 テキスト読み上げ（直接入力）
+      </button>
+    </div>
+  </nav>
 
+  <main class="layout">
+    <!-- 左ペイン: 入力エリア（チャット または 読み上げ） -->
+    <section class="card composer">
+      <!-- 共通コントロール: 声と速さ -->
       <div class="controls-row">
         <label class="field">
-          <span class="field-label">声</span>
+          <span class="field-label">声 (クローン)</span>
           <div class="select-wrap">
             <select id="voice-select" aria-label="声を選択">
               <option value="">読み込み中...</option>
@@ -48,27 +66,48 @@
         </label>
       </div>
 
-      <div class="textarea-wrap">
-        <textarea id="tts-text" rows="6" maxlength="1000"
-          placeholder="ここに読み上げたい文章を入力してください。&#10;例：今日はいい天気ですね。散歩に行きましょう。"></textarea>
-        <span id="char-count" class="char-count">0 / 1000</span>
+      <!-- パネル1: チャット対話モード -->
+      <div id="panel-chat" class="panel-content">
+        <div id="chat-messages" class="chat-messages" aria-live="polite">
+          <div class="chat-bubble chat-bubble-ai welcome-msg">
+            <p>こんにちは！話しかけてくれたら、設定された人格で考えて声で答えるよ。</p>
+          </div>
+        </div>
+
+        <div class="chat-input-bar">
+          <textarea id="chat-input" rows="2" placeholder="メッセージを入力... (Enterで送信、Shift+Enterで改行)"></textarea>
+          <button id="send-chat-btn" class="btn-primary" type="button">
+            <span class="btn-spinner" aria-hidden="true"></span>
+            <span class="btn-label">話す</span>
+          </button>
+        </div>
       </div>
 
-      <div class="actions">
-        <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> で読み上げ</span>
-        <button id="speak-btn" class="btn-primary" type="button">
-          <span class="btn-spinner" aria-hidden="true"></span>
-          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-          <span class="btn-label">読み上げる</span>
-        </button>
+      <!-- パネル2: テキスト直打ち読み上げモード -->
+      <div id="panel-tts" class="panel-content is-hidden">
+        <div class="textarea-wrap">
+          <textarea id="tts-text" rows="6" maxlength="1000"
+            placeholder="ここに読み上げたい文章を入力してください。&#10;例：今日はいい天気ですね。散歩に行きましょう。"></textarea>
+          <span id="char-count" class="char-count">0 / 1000</span>
+        </div>
+
+        <div class="actions">
+          <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> で読み上げ</span>
+          <button id="speak-btn" class="btn-primary" type="button">
+            <span class="btn-spinner" aria-hidden="true"></span>
+            <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+            <span class="btn-label">読み上げる</span>
+          </button>
+        </div>
       </div>
     </section>
 
+    <!-- 右上: 音声プレイヤー -->
     <section class="card player" aria-labelledby="player-title">
-      <h2 id="player-title" class="card-title">再生</h2>
+      <h2 id="player-title" class="card-title">リアルタイム音声再生</h2>
       <div class="visualizer-wrap">
         <canvas id="visualizer" aria-hidden="true"></canvas>
-        <p id="now-playing" class="now-playing">文章を入力して「読み上げる」を押してください</p>
+        <p id="now-playing" class="now-playing">メッセージを送信するか文章を読み上げてください</p>
       </div>
 
       <div class="transport">
@@ -86,16 +125,35 @@
       <audio id="audio" preload="auto"></audio>
     </section>
 
+    <!-- 右下: 発話履歴 -->
     <section class="card history" aria-labelledby="history-title">
       <div class="history-head">
-        <h2 id="history-title" class="card-title">履歴</h2>
+        <h2 id="history-title" class="card-title">発話ログ</h2>
         <button id="clear-history-btn" class="btn-text" type="button">クリア</button>
       </div>
       <ul id="history-list" class="history-list">
-        <li class="history-empty">まだ履歴はありません</li>
+        <li class="history-empty">まだ発話はありません</li>
       </ul>
     </section>
   </main>
+
+  <!-- 人格プロンプト設定モーダル -->
+  <dialog id="persona-dialog" class="dialog">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <h3>⚙ AI人格プロンプトの設定 (persona.txt)</h3>
+        <button id="close-dialog-btn" class="btn-close" type="button" aria-label="閉じる">×</button>
+      </div>
+      <p class="dialog-desc">
+        ここで定義した「口調」「性格」「会話例」に基づいて、Gemini が本人のように回答を考えます。
+      </p>
+      <textarea id="persona-textarea" rows="12" placeholder="人格プロンプトを読み込み中..."></textarea>
+      <div class="dialog-actions">
+        <span id="persona-status" class="persona-status"></span>
+        <button id="save-persona-btn" class="btn-primary" type="button">保存する</button>
+      </div>
+    </div>
+  </dialog>
 
   <footer class="site-footer">
     自分の声、または本人の同意を得た声だけを使ってください。
