@@ -189,9 +189,216 @@ def api_tts():
     return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
+def synthesize_speech_segment(text: str, voice: str, speed: float | None = None) -> bytes:
+    fish_client = get_fish_client()
+    audio = fish_client.tts.convert(
+        text=text,
+        reference_id=resolve_voice_id(voice),
+        speed=speed,
+        config=TTSConfig(format="mp3", latency="balanced"),
+        model=DEFAULT_MODEL,
+    )
+    if not isinstance(audio, bytes):
+        audio = b"".join(audio)
+    return audio
+
+
+@app.post("/api/chat/stream")
+def api_chat_stream():
+    """Geminiの回答テキストとFish Audio音声合成を文単位でストリーミングするSSEエンドポイント"""
+    gemini_key = get_gemini_api_key()
+    if not gemini_key:
+        return error(
+            "Gemini API キーが設定されていません。.env ファイルの GEMINI_API_KEY にキーを記載してください。",
+            400,
+        )
+
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message", "")).strip()
+    voice = str(data.get("voice", "")).strip()
+    history = data.get("history", [])
+    custom_persona = data.get("persona")
+    enable_tts = bool(data.get("enable_tts", False))
+
+    if not message:
+        return error("メッセージを入力してください。", 400)
+    if not voice:
+        return error("声を選択してください。", 400)
+
+    speed = data.get("speed")
+    if speed is not None:
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            speed = None
+
+    t_start = time.time()
+    system_prompt = custom_persona if custom_persona else load_persona_text()
+
+    def generate_sse():
+        import json
+        from google import genai
+        from google.genai import types
+
+        t_first_audio = None
+        full_reply_chunks = []
+        sentence_buffer = ""
+        delimiters = set("。！？!?\n")
+        segment_index = 0
+        total_tts_time = 0.0
+
+        try:
+            gemini_client = genai.Client(api_key=gemini_key)
+            contents = []
+            for h in history[-8:]:
+                role = "user" if h.get("role") == "user" else "model"
+                text_val = str(h.get("text", "")).strip()
+                if text_val:
+                    contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text_val)]))
+
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message)]))
+            speed_instruction = f"{system_prompt}\n\n【最重要ルール】音声合成のため、必ず1文または2文（50文字以内）の超短文で返答してください。"
+
+            # Gemini ストリーミング呼び出し（503混雑時フォールバック対応）
+            candidate_models = ["gemini-3.5-flash-lite", "gemini-flash-latest"]
+            stream_iter = None
+            first_chunk = None
+
+            for model_name in candidate_models:
+                try:
+                    s_resp = gemini_client.models.generate_content_stream(
+                        model=model_name,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=speed_instruction,
+                            temperature=0.7,
+                            max_output_tokens=100,
+                        ),
+                    )
+                    s_iter = iter(s_resp)
+                    first_chunk = next(s_iter)
+                    stream_iter = s_iter
+                    break
+                except Exception as m_err:
+                    print(f"[DEBUG] モデル {model_name} 呼び出し失敗 (フォールバック試行): {m_err}", flush=True)
+                    continue
+
+            if first_chunk is None and stream_iter is None:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Gemini API からの応答を取得できませんでした'})}\n\n"
+                return
+
+            t_gemini_start = time.time()
+            t_gemini_first = None
+
+            def process_sentence(sentence_text: str):
+                nonlocal segment_index, total_tts_time, t_first_audio
+                clean_s = clean_tts_text(sentence_text)
+                if not clean_s or len(clean_s.strip()) < 1:
+                    return None
+
+                if enable_tts:
+                    t_tts_s = time.time()
+                    try:
+                        audio_bytes = synthesize_speech_segment(clean_s, voice, speed)
+                        tts_elapsed = time.time() - t_tts_s
+                        total_tts_time += tts_elapsed
+                        b64 = base64.b64encode(audio_bytes).decode("ascii")
+                        now_since_start = round(time.time() - t_start, 2)
+                        if t_first_audio is None:
+                            t_first_audio = now_since_start
+
+                        event_data = {
+                            "type": "audio_segment",
+                            "index": segment_index,
+                            "text": clean_s,
+                            "audio_base64": b64,
+                            "latency_sec": now_since_start,
+                        }
+                        segment_index += 1
+                        return f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                    except Exception as tts_err:
+                        print(f"[DEBUG] セグメントTTS失敗: {tts_err}", flush=True)
+                        return None
+                return None
+
+            import itertools
+            for chunk in itertools.chain([first_chunk], stream_iter):
+                chunk_text = chunk.text or ""
+                if not chunk_text:
+                    continue
+
+                if t_gemini_first is None:
+                    t_gemini_first = round(time.time() - t_gemini_start, 2)
+
+                full_reply_chunks.append(chunk_text)
+                sentence_buffer += chunk_text
+
+                # テキストチャンクを即時送信（タイピング表示用）
+                yield f"data: {json.dumps({'type': 'text_chunk', 'text': chunk_text}, ensure_ascii=False)}\n\n"
+
+                # 文区切りの検査
+                while True:
+                    split_idx = -1
+                    for i, ch in enumerate(sentence_buffer):
+                        if ch in delimiters:
+                            split_idx = i + 1
+                            break
+                        elif i >= 25 and ch in "、, ":
+                            split_idx = i + 1
+                            break
+                    if split_idx != -1:
+                        target_sent = sentence_buffer[:split_idx]
+                        sentence_buffer = sentence_buffer[split_idx:]
+                        audio_event = process_sentence(target_sent)
+                        if audio_event:
+                            yield audio_event
+                    else:
+                        break
+
+            # 残りの未処理テキスト
+            if sentence_buffer.strip():
+                audio_event = process_sentence(sentence_buffer)
+                if audio_event:
+                    yield audio_event
+
+            full_reply = "".join(full_reply_chunks)
+            total_sec = round(time.time() - t_start, 2)
+            gemini_total = round(time.time() - t_gemini_start, 2)
+
+            print(f"\n[DEBUG] ========================================", flush=True)
+            print(f"[DEBUG] [STREAM] メッセージ: \"{message}\"", flush=True)
+            print(f"[DEBUG] [STREAM] TTS設定   : {'ON' if enable_tts else 'OFF'}", flush=True)
+            print(f"[DEBUG] [GEMINI初速]       : {t_gemini_first} 秒 (全完了: {gemini_total}秒)", flush=True)
+            if enable_tts:
+                print(f"[DEBUG] [音声初声]         : {t_first_audio} 秒", flush=True)
+                print(f"[DEBUG] [全体完了時間]     : {total_sec} 秒", flush=True)
+            else:
+                print(f"[DEBUG] [全体完了時間]     : {total_sec} 秒", flush=True)
+            print(f"[DEBUG] 返答内容           : \"{full_reply}\"", flush=True)
+            print(f"[DEBUG] ========================================\n", flush=True)
+
+            timing_info = {
+                "gemini_first_sec": t_gemini_first or 0,
+                "gemini_total_sec": gemini_total,
+                "first_audio_sec": t_first_audio,
+                "tts_total_sec": round(total_tts_time, 2),
+                "total_sec": total_sec,
+                "enable_tts": enable_tts,
+            }
+
+            yield f"data: {json.dumps({'type': 'done', 'reply': full_reply, 'voice': voice, 'timing': timing_info}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            print(f"[DEBUG] ストリーミング処理エラー: {e}", flush=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    from flask import Response, stream_with_context
+    return Response(stream_with_context(generate_sse()), mimetype="text/event-stream")
+
+
 @app.post("/api/chat")
 def api_chat():
-    """Gemini API で人格に沿った回答を生成し、その声で音声合成して返す"""
+    """AI対話（Geminiで返答生成 ＋ オプションでFish Audioで音声合成）"""
     gemini_key = get_gemini_api_key()
     if not gemini_key:
         return error(
@@ -283,11 +490,11 @@ def api_chat():
     if not enable_tts:
         total_sec = round(time.time() - t_start, 2)
         print(f"\n[DEBUG] ========================================", flush=True)
-        print(f"[DEBUG] メッセージ       : \"{message}\"", flush=True)
-        print(f"[DEBUG] 音声合成(TTS)    : OFF（テキストのみ対話）", flush=True)
-        print(f"[DEBUG] ⚡ Gemini返答時間: {gemini_sec:.2f} 秒", flush=True)
-        print(f"[DEBUG] ⏱️ 合計所要時間   : {total_sec:.2f} 秒", flush=True)
-        print(f"[DEBUG] 返答内容         : \"{clean_reply}\"", flush=True)
+        print(f"[DEBUG] メッセージ         : \"{message}\"", flush=True)
+        print(f"[DEBUG] 音声合成(TTS)      : OFF（テキストのみ対話）", flush=True)
+        print(f"[DEBUG] [Gemini返答時間]   : {gemini_sec:.2f} 秒", flush=True)
+        print(f"[DEBUG] [合計所要時間]     : {total_sec:.2f} 秒", flush=True)
+        print(f"[DEBUG] 返答内容           : \"{clean_reply}\"", flush=True)
         print(f"[DEBUG] ========================================\n", flush=True)
         return jsonify(
             reply=clean_reply,
@@ -339,9 +546,9 @@ def api_chat():
     print(f"\n[DEBUG] ========================================", flush=True)
     print(f"[DEBUG] メッセージ          : \"{message}\"", flush=True)
     print(f"[DEBUG] 音声合成(TTS)       : ON（音声あり）", flush=True)
-    print(f"[DEBUG] ⚡ Gemini返答時間   : {gemini_sec:.2f} 秒", flush=True)
-    print(f"[DEBUG] 🔊 FishAudio(TTS)   : {tts_sec:.2f} 秒", flush=True)
-    print(f"[DEBUG] ⏱️ 合計所要時間      : {total_sec:.2f} 秒", flush=True)
+    print(f"[DEBUG] [Gemini返答時間]    : {gemini_sec:.2f} 秒", flush=True)
+    print(f"[DEBUG] [FishAudio返答時間] : {tts_sec:.2f} 秒", flush=True)
+    print(f"[DEBUG] [合計所要時間]      : {total_sec:.2f} 秒", flush=True)
     print(f"[DEBUG] 返答内容            : \"{clean_reply}\"", flush=True)
     print(f"[DEBUG] ========================================\n", flush=True)
 

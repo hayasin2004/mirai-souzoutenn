@@ -170,7 +170,79 @@ els.tabTts.addEventListener("click", () => {
   els.ttsText.focus();
 });
 
-/* ---------- AI対話 (Chat) ---------- */
+/* ---------- オーディオキュー管理（ストリーミング連続再生） ---------- */
+
+class AudioQueuePlayer {
+  constructor() {
+    this.queue = [];
+    this.isPlaying = false;
+    this.currentAudio = null;
+    this.onStateChange = null;
+  }
+
+  enqueue(item) {
+    this.queue.push(item);
+    if (!this.isPlaying) {
+      this.playNext();
+    }
+  }
+
+  clear() {
+    this.queue = [];
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio = null;
+    }
+    this.isPlaying = false;
+  }
+
+  playNext() {
+    if (this.queue.length === 0) {
+      this.isPlaying = false;
+      this.currentAudio = null;
+      if (this.onStateChange) this.onStateChange(false, null);
+      return;
+    }
+
+    this.isPlaying = true;
+    const current = this.queue.shift();
+    if (this.onStateChange) this.onStateChange(true, current);
+
+    const audio = new Audio(current.url);
+    this.currentAudio = audio;
+    audio.onended = () => {
+      this.playNext();
+    };
+    audio.onerror = (e) => {
+      console.warn("セグメント再生エラー:", e);
+      this.playNext();
+    };
+    audio.play().catch((err) => {
+      console.warn("自動再生エラー:", err);
+      this.playNext();
+    });
+  }
+
+  playAll(items) {
+    this.clear();
+    for (const it of items) {
+      this.queue.push(it);
+    }
+    this.playNext();
+  }
+}
+
+const audioQueue = new AudioQueuePlayer();
+
+audioQueue.onStateChange = (playing, current) => {
+  if (playing && current) {
+    els.nowPlaying.textContent = `市川 拓（たく）: ${current.text}`;
+  } else {
+    els.nowPlaying.textContent = "待機中";
+  }
+};
+
+/* ---------- AI対話 (Chat - ストリーミング版) ---------- */
 
 function setChatLoading(loading) {
   els.sendChatBtn.disabled = loading;
@@ -179,7 +251,7 @@ function setChatLoading(loading) {
   els.sendChatBtn.querySelector(".btn-label").textContent = loading
     ? (withTts ? "思考＆発話中..." : "思考中...")
     : "話す";
-  if (loading) els.nowPlaying.textContent = withTts ? "考え中＆音声を生成中..." : "考え中...";
+  if (loading) els.nowPlaying.textContent = withTts ? "思考中＆音声生成中..." : "考え中...";
 }
 
 async function sendChat() {
@@ -203,8 +275,18 @@ async function sendChat() {
 
   const speed = Number(els.speed.value);
 
+  // 2. AIの吹き出しをプレースホルダーとして配置（リアルタイムタイピング用）
+  const aiBubble = createStreamingAiBubble();
+  const textEl = aiBubble.querySelector(".bubble-text");
+  const metaEl = aiBubble.querySelector(".bubble-meta");
+  const cursorEl = aiBubble.querySelector(".typing-cursor");
+
+  let fullReplyText = "";
+  const audioSegments = [];
+  let firstAudioPlayed = false;
+
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -216,48 +298,182 @@ async function sendChat() {
       }),
     });
 
-    const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || `HTTP ${res.status}`);
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `HTTP ${res.status}`);
     }
 
-    // デバッグ用コンソール出力
-    if (data.timing) {
-      console.log(`[DEBUG] ⏱️ 生成所要時間: 合計 ${data.timing.total_sec}秒 (Gemini: ${data.timing.gemini_sec}秒, TTS: ${data.timing.tts_sec}秒, TTS有効: ${data.timing.enable_tts})`);
-    } else {
-      console.log("[DEBUG] レスポンス:", data);
-    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-    // 会話履歴を更新
-    chatHistory.push({ role: "user", text: message });
-    chatHistory.push({ role: "model", text: data.reply });
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    // 2. AIの吹き出しを追加
-    const item = {
-      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
-      text: data.reply,
-      voice: data.voice,
-      url: data.audio_base64 ? b64ToBlobUrl(data.audio_base64) : null,
-      filename: `tts_${timestampForFile(new Date())}.mp3`,
-      createdAt: new Date(),
-    };
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop(); // 未完了の行をバッファに残す
 
-    appendChatBubble("model", data.reply, item, data.timing);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
 
-    if (item.url) {
-      addHistory(item);
-      playItem(item);
-    } else {
-      els.nowPlaying.textContent = `市川 拓（たく）：${data.reply}`;
+        const jsonStr = trimmed.slice(5).trim();
+        if (!jsonStr) continue;
+
+        let payload;
+        try {
+          payload = JSON.parse(jsonStr);
+        } catch (pe) {
+          console.warn("SSEパースエラー:", pe, jsonStr);
+          continue;
+        }
+
+        if (payload.type === "text_chunk") {
+          fullReplyText += payload.text;
+          textEl.textContent = fullReplyText;
+          if (cursorEl) textEl.appendChild(cursorEl);
+          els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+        } else if (payload.type === "audio_segment") {
+          // 音声セグメント受信 ➔ 即キュー投入＆再生
+          const blobUrl = b64ToBlobUrl(payload.audio_base64);
+          const segItem = {
+            index: payload.index,
+            text: payload.text,
+            url: blobUrl,
+            latencySec: payload.latency_sec,
+          };
+          audioSegments.push(segItem);
+
+          if (!firstAudioPlayed) {
+            firstAudioPlayed = true;
+            console.log(`[DEBUG] ⚡ 初声レイテンシー: ${payload.latency_sec}秒`);
+          }
+
+          audioQueue.enqueue(segItem);
+        } else if (payload.type === "done") {
+          if (cursorEl) cursorEl.remove();
+
+          // タイミング情報
+          const timing = payload.timing;
+          if (timing) {
+            console.log(
+              `[DEBUG] ⏱️ 完了: 合計 ${timing.total_sec}秒 (Gemini初速: ${timing.gemini_first_sec}秒, 最初の声: ${timing.first_audio_sec || "-"}秒, TTS計: ${timing.tts_total_sec}秒)`
+            );
+            const timingBadge = document.createElement("span");
+            timingBadge.className = "bubble-timing";
+            if (timing.enable_tts && timing.first_audio_sec) {
+              timingBadge.title = `最初の声: ${timing.first_audio_sec}s / Gemini: ${timing.gemini_first_sec}s / 全完了: ${timing.total_sec}s`;
+              timingBadge.textContent = `⚡ 初声 ${timing.first_audio_sec}s / ⏱️ ${timing.total_sec}s`;
+            } else {
+              timingBadge.title = `Gemini: ${timing.gemini_total_sec}s / 全完了: ${timing.total_sec}s`;
+              timingBadge.textContent = `⚡ ${timing.gemini_total_sec}s`;
+            }
+            metaEl.prepend(timingBadge);
+          }
+
+          // 「もう一度聴く」または「声で聴く」ボタンの設定
+          const playBtn = document.createElement("button");
+          playBtn.className = "bubble-play-btn";
+          playBtn.type = "button";
+
+          if (audioSegments.length > 0) {
+            playBtn.innerHTML = "▶ もう一度聴く";
+            playBtn.addEventListener("click", () => {
+              ensureAudioGraph();
+              audioQueue.playAll(audioSegments);
+            });
+            metaEl.append(playBtn);
+
+            // 履歴に追加
+            addHistory({
+              id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+              text: fullReplyText,
+              voice: payload.voice,
+              url: audioSegments[0].url,
+              filename: `tts_${timestampForFile(new Date())}.mp3`,
+              createdAt: new Date(),
+            });
+          } else {
+            // TTSがOFFだった場合：オンデマンドで生成するボタン
+            playBtn.innerHTML = "🔊 声で聴く";
+            playBtn.addEventListener("click", async () => {
+              ensureAudioGraph();
+              playBtn.disabled = true;
+              playBtn.innerHTML = "⏳ 生成中...";
+              try {
+                const spd = Number(els.speed.value);
+                const resTts = await fetch("/api/tts", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    text: fullReplyText,
+                    voice: els.voice.value,
+                    speed: spd === 1 ? null : spd,
+                  }),
+                });
+                if (!resTts.ok) throw new Error("音声の生成に失敗しました");
+                const blob = await resTts.blob();
+                const item = {
+                  id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+                  text: fullReplyText,
+                  voice: els.voice.value,
+                  url: URL.createObjectURL(blob),
+                  filename: `tts_${timestampForFile(new Date())}.mp3`,
+                  createdAt: new Date(),
+                };
+                addHistory(item);
+                playItem(item);
+                playBtn.disabled = false;
+                playBtn.innerHTML = "▶ もう一度聴く";
+                playBtn.onclick = () => playItem(item);
+              } catch (e) {
+                showToast(e.message);
+                playBtn.disabled = false;
+                playBtn.innerHTML = "🔊 声で聴く";
+              }
+            });
+            metaEl.append(playBtn);
+          }
+
+          // 会話履歴更新
+          chatHistory.push({ role: "user", text: message });
+          chatHistory.push({ role: "model", text: fullReplyText });
+        } else if (payload.type === "error") {
+          throw new Error(payload.message || "ストリーミングエラー");
+        }
+      }
     }
   } catch (e) {
+    if (cursorEl) cursorEl.remove();
     showToast(e.message);
-    appendChatBubble("model", `（エラー: ${e.message}）`);
+    textEl.textContent = `（エラー: ${e.message}）`;
     els.nowPlaying.textContent = "対話エラー";
   } finally {
     setChatLoading(false);
     els.chatInput.focus();
   }
+}
+
+function createStreamingAiBubble() {
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble chat-bubble-ai";
+
+  const p = document.createElement("p");
+  p.className = "bubble-text";
+
+  const cursor = document.createElement("span");
+  cursor.className = "typing-cursor";
+  p.appendChild(cursor);
+
+  const meta = document.createElement("div");
+  meta.className = "bubble-meta";
+
+  bubble.append(p, meta);
+  els.chatMessages.append(bubble);
+  els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+  return bubble;
 }
 
 function appendChatBubble(role, text, audioItem = null, timing = null) {
@@ -291,7 +507,6 @@ function appendChatBubble(role, text, audioItem = null, timing = null) {
         playItem(audioItem);
       });
     } else {
-      // まだ音声がない場合：オンデマンドで生成
       playBtn.innerHTML = "🔊 声で聴く";
       playBtn.addEventListener("click", async () => {
         ensureAudioGraph();
