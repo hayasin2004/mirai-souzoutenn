@@ -574,9 +574,13 @@ from line_bot import (
     verify_line_signature,
     load_line_logs,
     save_line_log,
+    save_line_user,
+    get_active_line_users,
     reply_line_message,
     generate_interview_reply,
     update_persona_from_logs,
+    send_proactive_question_to_users,
+    start_proactive_scheduler,
 )
 
 
@@ -585,11 +589,13 @@ def api_line_status():
     """LINE連携の状態と蓄積ログのサマリーを返す"""
     secret, token = get_line_credentials()
     logs = load_line_logs()
+    users = get_active_line_users()
     unlearned_count = sum(1 for l in logs if not l.get("learned", False))
     return jsonify(
         configured=bool(secret and token),
         total_logs=len(logs),
         unlearned_logs=unlearned_count,
+        users_count=len(users),
         recent_logs=logs[-10:],
     )
 
@@ -618,12 +624,17 @@ def api_line_webhook():
 
     for event in events:
         ev_type = event.get("type")
+        user_id = event.get("source", {}).get("userId", "unknown_user")
+
+        # ユーザーIDを記憶（後で自発的に話しかけるため）
+        if user_id and user_id != "unknown_user":
+            save_line_user(user_id)
+
         if ev_type == "message":
             msg_obj = event.get("message", {})
             if msg_obj.get("type") == "text":
                 user_text = msg_obj.get("text", "").strip()
                 reply_token = event.get("replyToken")
-                user_id = event.get("source", {}).get("userId", "unknown_user")
 
                 if not user_text or not reply_token:
                     continue
@@ -641,6 +652,24 @@ def api_line_webhook():
                 save_line_log(user_id, user_text, ai_reply)
 
     return "OK", 200
+
+
+@app.post("/api/line/proactive")
+def api_line_proactive():
+    """Geminiが過去の会話からまだ知らないことを考え、自発的にLINEで質問を送信"""
+    secret, token = get_line_credentials()
+    if not secret or not token:
+        return error("LINE のクレデンシャルが設定されていません", 400)
+
+    gemini_key = get_gemini_api_key()
+    if not gemini_key:
+        return error("Gemini API キーが設定されていません", 400)
+
+    result = send_proactive_question_to_users(gemini_key, token)
+    if not result.get("success"):
+        return error(result.get("message", "自発質問の送信に失敗しました"), 400)
+
+    return jsonify(result)
 
 
 @app.post("/api/line/learn")
@@ -675,6 +704,13 @@ def main() -> None:
 
     url = f"http://{args.host}:{args.port}"
     print(f"起動しました → {url}  （終了は Ctrl+C）")
+
+    # LINE自発インタビュー定期スケジューラーを起動
+    g_key = get_gemini_api_key()
+    _, l_token = get_line_credentials()
+    if g_key and l_token:
+        start_proactive_scheduler(g_key, l_token)
+
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
 

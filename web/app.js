@@ -56,6 +56,8 @@ const els = {
   lineConfigStatus: $("line-config-status"),
   lineTotalCount: $("line-total-count"),
   lineUnlearnedCount: $("line-unlearned-count"),
+  lineUsersCount: $("line-users-count"),
+  lineProactiveBtn: $("line-proactive-btn"),
   lineLearnBtn: $("line-learn-btn"),
   lineRefreshBtn: $("line-refresh-btn"),
   webhookUrlCode: $("webhook-url-code"),
@@ -220,6 +222,7 @@ async function loadLineStatus() {
     }
     if (els.lineTotalCount) els.lineTotalCount.textContent = `${data.total_logs} 件`;
     if (els.lineUnlearnedCount) els.lineUnlearnedCount.textContent = `${data.unlearned_logs} 件`;
+    if (els.lineUsersCount) els.lineUsersCount.textContent = `${data.users_count || 0} 人`;
     if (els.lineLogsBadge) els.lineLogsBadge.textContent = `${data.total_logs} 件`;
 
     // Webhook URL の表示（現在のホストから自動生成）
@@ -294,6 +297,29 @@ if (els.copyWebhookBtn && els.webhookUrlCode) {
     }).catch(() => {
       showToast("コピーに失敗しました。直接選択してコピーしてください。");
     });
+  });
+}
+
+if (els.lineProactiveBtn) {
+  els.lineProactiveBtn.addEventListener("click", async () => {
+    els.lineProactiveBtn.disabled = true;
+    els.lineProactiveBtn.classList.add("is-loading");
+    els.lineProactiveBtn.querySelector(".btn-label").textContent = "Geminiが話題を考案中...";
+
+    try {
+      const res = await fetch("/api/line/proactive", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "自発質問の送信に失敗しました");
+
+      showToast(data.message || "拓さんのLINEに自発的な質問を送信しました！");
+      await loadLineStatus();
+    } catch (e) {
+      showToast(e.message);
+    } finally {
+      els.lineProactiveBtn.disabled = false;
+      els.lineProactiveBtn.classList.remove("is-loading");
+      els.lineProactiveBtn.querySelector(".btn-label").textContent = "💡 拓さんに自発的に質問する（話題を振る）";
+    }
   });
 }
 

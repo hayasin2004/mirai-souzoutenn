@@ -119,6 +119,181 @@ def reply_line_message(reply_token: str, reply_text: str, access_token: str) -> 
         return False
 
 
+USERS_FILE = DATA_DIR / "line_users.json"
+
+
+def save_line_user(user_id: str) -> None:
+    """メッセージを受信したLINEユーザーを記録"""
+    if not user_id or user_id == "unknown_user":
+        return
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with _logs_lock:
+        users = []
+        if USERS_FILE.exists():
+            try:
+                with open(USERS_FILE, "r", encoding="utf-8") as f:
+                    users = json.load(f)
+            except Exception:
+                users = []
+        if user_id not in users:
+            users.append(user_id)
+            with open(USERS_FILE, "w", encoding="utf-8") as f:
+                json.dump(users, f, ensure_ascii=False, indent=2)
+
+
+def get_active_line_users() -> List[str]:
+    """登録されているLINEユーザー一覧を取得"""
+    if not USERS_FILE.exists():
+        # 会話ログからも復元
+        logs = load_line_logs()
+        u_set = {l.get("user_id") for l in logs if l.get("user_id") and l.get("user_id") != "unknown_user"}
+        return list(u_set)
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def push_line_message(user_id: str, text: str, access_token: str) -> bool:
+    """LINE Messaging API の push エンドポイントで自発的にメッセージを送信"""
+    url = "https://api.me.line.v2/bot/message/push"  # 後で https://api.line.me/v2/bot/message/push に修正
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+    payload = {
+        "to": user_id,
+        "messages": [
+            {
+                "type": "text",
+                "text": text,
+            }
+        ],
+    }
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(url, headers=headers, json=payload)
+            if not resp.is_success:
+                print(f"[ERROR] LINE プッシュ送信失敗 ({resp.status_code}): {resp.text}")
+                return False
+            print(f"[LINE プッシュ成功] {user_id} 宛: \"{text}\"", flush=True)
+            return True
+    except Exception as e:
+        print(f"[ERROR] LINE プッシュ送信例外: {e}")
+        return False
+
+
+def generate_proactive_question(gemini_api_key: str, user_id: Optional[str] = None) -> str:
+    """
+    現在のpersona.txtと過去の会話ログを分析し、「まだ知らないこと」「もっと深く知りたいこと」を自発的に尋ねる質問文を生成
+    """
+    from google import genai
+    from google.genai import types
+
+    # 現在のペルソナ情報
+    current_persona = ""
+    if PERSONA_FILE.exists():
+        with open(PERSONA_FILE, "r", encoding="utf-8") as f:
+            current_persona = f.read()
+
+    # 直近の会話ログ
+    logs = load_line_logs()
+    if user_id:
+        logs = [l for l in logs if l.get("user_id") == user_id]
+    recent_logs_text = ""
+    for l in logs[-12:]:
+        recent_logs_text += f"拓さん: {l['user_message']}\nAI: {l['ai_reply']}\n"
+
+    # 時間帯に応じた雰囲気づくり
+    now_hour = datetime.now().hour
+    time_hint = "日中"
+    if 5 <= now_hour < 11:
+        time_hint = "朝"
+    elif 11 <= now_hour < 14:
+        time_hint = "お昼休み"
+    elif 17 <= now_hour < 20:
+        time_hint = "夕方・帰宅時間"
+    elif 20 <= now_hour <= 23:
+        time_hint = "夜のリラックスタイム"
+
+    prompt = (
+        "あなたはユーザー（市川 拓さん）の『分身AI』を作るための、専属の相棒AIです。\n\n"
+        "【すでに知っている拓さんの情報（persona.txt）】\n"
+        f"{current_persona}\n\n"
+        "【最近のLINE会話履歴】\n"
+        f"{recent_logs_text if recent_logs_text else '（まだ会話履歴はありません）'}\n\n"
+        f"【現在の時間帯】: {time_hint}（{now_hour}時頃）\n\n"
+        "【あなたのタスク】\n"
+        "拓さんについて『まだ詳しくわかっていないこと』や『もっと深掘りしたいエピソード（日頃のこだわり、最近あったこと、好きなものの細かい話、人間関係、口癖、価値観など）』を1つ見つけてください。\n"
+        "友達としてLINEでふと思いついたように話しかける、自然な質問メッセージを作成してください。\n\n"
+        "【ルール】\n"
+        "1. 親しい友達のような気さくなタメ口（敬語は絶対に使わない）。\n"
+        "2. 必ず1文〜2文（50文字以内）の超短文にすること。\n"
+        "3. 絵文字やマークダウン記号は使わず、自然な話し言葉にすること。\n"
+        "4. 時間帯に合った自然な切り出し（『そういえば〜』『ふと思ったんだけど〜』『おつかれ！〜』など）にすること。\n"
+        "5. 質問文そのものだけを出力してください。"
+    )
+
+    client = genai.Client(api_key=gemini_api_key)
+
+    for model_name in ["gemini-3.5-flash-lite", "gemini-flash-latest"]:
+        try:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.85,
+                    max_output_tokens=100,
+                ),
+            )
+            if resp and resp.text:
+                clean_q = resp.text.strip().replace("「", "").replace("」", "").replace('"', "")
+                return clean_q
+        except Exception as e:
+            print(f"[WARN] 自発質問生成リトライ ({model_name}): {e}")
+            continue
+
+    return "そういえば拓さん、休みの日はいつも何時くらいに起きてるの？"
+
+
+def send_proactive_question_to_users(gemini_api_key: str, access_token: str) -> Dict[str, Any]:
+    """登録されているアクティブユーザー全員（または最新のユーザー）に自発的な質問を送信"""
+    users = get_active_line_users()
+    if not users:
+        return {
+            "success": False,
+            "message": "まだLINEで話しかけてくれたユーザーがいません。一度本人のLINEからメッセージを受信すると送信先として記憶されます。",
+            "sent_count": 0,
+        }
+
+    question = generate_proactive_question(gemini_api_key)
+    sent_count = 0
+
+    for uid in users:
+        ok = push_line_message(uid, question, access_token)
+        if ok:
+            sent_count += 1
+            # AIからの能動メッセージとしてログに保存
+            save_line_log(uid, "（AIからの自発的な質問）", question)
+
+    if sent_count > 0:
+        return {
+            "success": True,
+            "message": f"拓さんのLINEに自発的な質問を送信しました！\n質問内容：「{question}」",
+            "question": question,
+            "sent_count": sent_count,
+        }
+    else:
+        return {
+            "success": False,
+            "message": "LINEへのプッシュ送信に失敗しました。トークンを確認してください。",
+            "sent_count": 0,
+        }
+
+
 def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: str) -> str:
     """
     本人（市川拓さん）から自然にエピソードや口癖を引き出すインタビュー返信を生成
@@ -264,3 +439,53 @@ def update_persona_from_logs(gemini_api_key: str) -> Dict[str, Any]:
         "learned_count": len(log_ids),
         "updated_persona": updated_persona_text,
     }
+
+
+_last_proactive_time: float = 0.0
+
+
+def should_auto_proactive() -> bool:
+    """自動自発質問を送信すべきタイミングか判定（営業時間内＆4時間以上経過）"""
+    global _last_proactive_time
+    now = datetime.now()
+    # 深夜早朝 (23:00〜8:00) は送信しない
+    if now.hour < 8 or now.hour >= 23:
+        return False
+    # 前回の自発質問から4時間以上空ける
+    if time.time() - _last_proactive_time < 4 * 3600:
+        return False
+    # 直近の会話ログを確認（相手が話してから2時間以内の場合はまだ話しかけない）
+    logs = load_line_logs()
+    if logs:
+        last_log = logs[-1]
+        try:
+            last_dt = datetime.fromisoformat(last_log["timestamp"])
+            elapsed_sec = (now - last_dt).total_seconds()
+            if elapsed_sec < 3600 * 2:
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def start_proactive_scheduler(gemini_api_key: str, access_token: str, check_interval_sec: int = 1800) -> None:
+    """定期的に能動質問チェックを行うバックグラウンドワーカースレッドを起動"""
+    def worker():
+        global _last_proactive_time
+        print("[PROACTIVE] LINE自発インタビュー定期監視スレッドを開始しました", flush=True)
+        # 起動直後は5分待ってから定期チェック
+        time.sleep(300)
+        while True:
+            try:
+                if should_auto_proactive():
+                    print("[PROACTIVE] 自発質問の自動送信条件を満たしました。Geminiで質問を生成します...", flush=True)
+                    res = send_proactive_question_to_users(gemini_api_key, access_token)
+                    if res.get("success"):
+                        _last_proactive_time = time.time()
+                    print(f"[PROACTIVE] 送信結果: {res.get('message')}", flush=True)
+            except Exception as e:
+                print(f"[WARN] 自発質問スケジューラー例外: {e}", flush=True)
+            time.sleep(check_interval_sec)
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()

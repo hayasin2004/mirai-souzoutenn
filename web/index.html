@@ -129,15 +129,23 @@
               <span class="line-stat-label">未学習会話</span>
               <span id="line-unlearned-count" class="line-stat-val highlight">0 件</span>
             </div>
+            <div class="line-stat-item">
+              <span class="line-stat-label">登録ユーザー</span>
+              <span id="line-users-count" class="line-stat-val">0 人</span>
+            </div>
           </div>
 
           <div class="line-actions-row">
-            <button id="line-learn-btn" class="btn-primary btn-learn" type="button">
+            <button id="line-proactive-btn" class="btn-primary btn-proactive" type="button" title="Geminiが未開拓の質問を考えてLINEへ直接送信します">
               <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-label">✨ LINE会話からAI人格を学習・更新</span>
+              <span class="btn-label">💡 拓さんに自発的に質問する（話題を振る）</span>
+            </button>
+            <button id="line-learn-btn" class="btn-primary btn-learn" type="button" title="蓄積された会話からpersona.txtを自動更新します">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-label">✨ 会話からAI人格を学習・更新</span>
             </button>
             <button id="line-refresh-btn" class="btn-subtle" type="button" title="ログを更新">
-              🔄 ログ更新
+              🔄
             </button>
           </div>
         </div>
