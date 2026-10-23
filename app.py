@@ -567,6 +567,96 @@ def api_chat():
     )
 
 
+# ---------- LINE Bot 連携エンドポイント ----------
+
+from line_bot import (
+    get_line_credentials,
+    verify_line_signature,
+    load_line_logs,
+    save_line_log,
+    reply_line_message,
+    generate_interview_reply,
+    update_persona_from_logs,
+)
+
+
+@app.get("/api/line/status")
+def api_line_status():
+    """LINE連携の状態と蓄積ログのサマリーを返す"""
+    secret, token = get_line_credentials()
+    logs = load_line_logs()
+    unlearned_count = sum(1 for l in logs if not l.get("learned", False))
+    return jsonify(
+        configured=bool(secret and token),
+        total_logs=len(logs),
+        unlearned_logs=unlearned_count,
+        recent_logs=logs[-10:],
+    )
+
+
+@app.post("/api/line/webhook")
+def api_line_webhook():
+    """LINE Messaging API からの Webhook を処理"""
+    secret, token = get_line_credentials()
+    if not secret or not token:
+        return "LINE credentials not configured", 500
+
+    signature = request.headers.get("X-Line-Signature", "")
+    body_bytes = request.get_data()
+
+    if not verify_line_signature(body_bytes, signature, secret):
+        print("[WARN] LINE Webhook 署名検証に失敗しました")
+        return "Invalid signature", 400
+
+    gemini_key = get_gemini_api_key()
+    if not gemini_key:
+        print("[WARN] Gemini APIキーが設定されていません")
+        return "Gemini API key missing", 500
+
+    data = request.get_json(silent=True) or {}
+    events = data.get("events", [])
+
+    for event in events:
+        ev_type = event.get("type")
+        if ev_type == "message":
+            msg_obj = event.get("message", {})
+            if msg_obj.get("type") == "text":
+                user_text = msg_obj.get("text", "").strip()
+                reply_token = event.get("replyToken")
+                user_id = event.get("source", {}).get("userId", "unknown_user")
+
+                if not user_text or not reply_token:
+                    continue
+
+                print(f"\n[LINE受信] 拓さん: \"{user_text}\"", flush=True)
+
+                # Gemini でインタビュー返信を生成
+                ai_reply = generate_interview_reply(user_text, user_id, gemini_key)
+                print(f"[LINE返信] AI: \"{ai_reply}\"", flush=True)
+
+                # LINEに返信
+                reply_line_message(reply_token, ai_reply, token)
+
+                # 会話ログを保存
+                save_line_log(user_id, user_text, ai_reply)
+
+    return "OK", 200
+
+
+@app.post("/api/line/learn")
+def api_line_learn():
+    """蓄積されたLINE会話ログから persona.txt を自動学習・更新"""
+    gemini_key = get_gemini_api_key()
+    if not gemini_key:
+        return error("Gemini API キーが設定されていません", 400)
+
+    result = update_persona_from_logs(gemini_key)
+    if not result.get("success"):
+        return error(result.get("message", "学習に失敗しました"), 400)
+
+    return jsonify(result)
+
+
 @app.get("/<path:path>")
 def static_files(path):
     return send_from_directory(WEB_DIR, path)

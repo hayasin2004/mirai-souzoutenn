@@ -785,3 +785,195 @@ kbd {
   white-space: pre-line;
 }
 .toast.is-visible { transform: translate(-50%, 0); opacity: 1; }
+
+/* ===== LINE 育成パネル ===== */
+.line-status-box {
+  background: hsl(232 30% 12% / 0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.line-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.line-stat-item {
+  background: hsl(232 32% 9% / 0.8);
+  border: 1px solid hsl(232 20% 18%);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.line-stat-label {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.line-stat-val {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.line-stat-val.highlight {
+  color: #06c755; /* LINE Green */
+}
+.line-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn-learn {
+  flex: 1;
+  background: linear-gradient(135deg, #06c755, #00b900);
+  border-color: #06c755;
+  color: #fff;
+  font-weight: 600;
+}
+.btn-learn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #05b34c, #00a000);
+  box-shadow: 0 4px 16px hsl(145 95% 40% / 0.35);
+}
+
+.line-webhook-info {
+  background: hsl(232 30% 10% / 0.5);
+  border: 1px dashed hsl(232 20% 22%);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.line-webhook-info .info-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-2);
+  margin-bottom: 4px;
+}
+.line-webhook-info .info-desc {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.webhook-url-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: hsl(232 35% 7%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.webhook-url-box code {
+  flex: 1;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: #06c755;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.btn-copy {
+  background: hsl(232 25% 18%);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-copy:hover {
+  background: var(--accent-1);
+  color: #fff;
+}
+
+.line-logs-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.logs-header h3 {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.logs-count-badge {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  background: hsl(232 30% 14%);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+.line-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.line-log-card {
+  background: hsl(232 30% 11% / 0.7);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.2s;
+}
+.line-log-card:hover {
+  border-color: hsl(232 25% 26%);
+}
+.log-row-user, .log-row-ai {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  display: flex;
+  gap: 6px;
+}
+.log-tag {
+  font-size: 0.72rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  flex-shrink: 0;
+  height: fit-content;
+}
+.log-tag-user {
+  background: #06c755;
+  color: #fff;
+}
+.log-tag-ai {
+  background: hsl(262 80% 55%);
+  color: #fff;
+}
+.log-meta-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+.status-pill {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+}
+.status-pill.unlearned {
+  background: hsl(38 92% 50% / 0.2);
+  color: hsl(38 92% 65%);
+}
+.status-pill.learned {
+  background: hsl(152 70% 45% / 0.2);
+  color: hsl(152 70% 60%);
+}

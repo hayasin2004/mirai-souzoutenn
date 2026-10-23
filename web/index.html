@@ -30,6 +30,7 @@
         ⚙ 人格プロンプト編集
       </button>
       <span id="gemini-badge" class="badge badge-warn">Gemini: 確認中...</span>
+      <span id="line-badge" class="badge">LINE: 確認中...</span>
       <span id="model-badge" class="badge">TTS: s2.1-pro-free</span>
     </div>
   </header>
@@ -42,6 +43,9 @@
       </button>
       <button id="tab-tts" class="tab-btn" role="tab" aria-selected="false" type="button">
         📝 テキスト読み上げ（直接入力）
+      </button>
+      <button id="tab-line" class="tab-btn" role="tab" aria-selected="false" type="button">
+        📱 LINE育成（会話ログ蓄積）
       </button>
     </div>
   </nav>
@@ -106,6 +110,57 @@
             <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
             <span class="btn-label">読み上げる</span>
           </button>
+        </div>
+      </div>
+
+      <!-- パネル3: LINE育成（会話ログ蓄積 & AI学習） -->
+      <div id="panel-line" class="panel-content is-hidden">
+        <div class="line-status-box">
+          <div class="line-stats-row">
+            <div class="line-stat-item">
+              <span class="line-stat-label">連携状態</span>
+              <span id="line-config-status" class="line-stat-val">確認中...</span>
+            </div>
+            <div class="line-stat-item">
+              <span class="line-stat-label">蓄積会話数</span>
+              <span id="line-total-count" class="line-stat-val">0 件</span>
+            </div>
+            <div class="line-stat-item">
+              <span class="line-stat-label">未学習会話</span>
+              <span id="line-unlearned-count" class="line-stat-val highlight">0 件</span>
+            </div>
+          </div>
+
+          <div class="line-actions-row">
+            <button id="line-learn-btn" class="btn-primary btn-learn" type="button">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-label">✨ LINE会話からAI人格を学習・更新</span>
+            </button>
+            <button id="line-refresh-btn" class="btn-subtle" type="button" title="ログを更新">
+              🔄 ログ更新
+            </button>
+          </div>
+        </div>
+
+        <div class="line-webhook-info">
+          <div class="info-title">💡 LINE Webhook 接続URL</div>
+          <p class="info-desc">
+            LINE Developers の「Messaging API設定 ➔ Webhook URL」に以下を指定して「Webhookの利用」をONにしてください：
+          </p>
+          <div class="webhook-url-box">
+            <code id="webhook-url-code">https://&lt;外部URL&gt;/api/line/webhook</code>
+            <button id="copy-webhook-btn" class="btn-copy" type="button">コピー</button>
+          </div>
+        </div>
+
+        <div class="line-logs-section">
+          <div class="logs-header">
+            <h3>📱 蓄積されたLINE対話ログ</h3>
+            <span id="line-logs-badge" class="logs-count-badge">0件</span>
+          </div>
+          <div id="line-logs-list" class="line-logs-list">
+            <div class="empty-state">まだLINEからの会話ログがありません。LINEで話しかけるとここにリアルタイムで蓄積されます。</div>
+          </div>
         </div>
       </div>
     </section>

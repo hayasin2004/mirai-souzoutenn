@@ -49,6 +49,20 @@ const els = {
   savePersonaBtn: $("save-persona-btn"),
   personaStatus: $("persona-status"),
 
+  // LINE育成
+  tabLine: $("tab-line"),
+  panelLine: $("panel-line"),
+  lineBadge: $("line-badge"),
+  lineConfigStatus: $("line-config-status"),
+  lineTotalCount: $("line-total-count"),
+  lineUnlearnedCount: $("line-unlearned-count"),
+  lineLearnBtn: $("line-learn-btn"),
+  lineRefreshBtn: $("line-refresh-btn"),
+  webhookUrlCode: $("webhook-url-code"),
+  copyWebhookBtn: $("copy-webhook-btn"),
+  lineLogsList: $("line-logs-list"),
+  lineLogsBadge: $("line-logs-badge"),
+
   toast: $("toast"),
 };
 
@@ -148,27 +162,164 @@ async function loadVoices() {
 
 /* ---------- タブ切り替え ---------- */
 
-els.tabChat.addEventListener("click", () => {
-  els.tabChat.classList.add("is-active");
-  els.tabChat.setAttribute("aria-selected", "true");
-  els.tabTts.classList.remove("is-active");
-  els.tabTts.setAttribute("aria-selected", "false");
+function switchTab(targetBtn, targetPanel) {
+  const tabs = [
+    { btn: els.tabChat, panel: els.panelChat },
+    { btn: els.tabTts, panel: els.panelTts },
+    { btn: els.tabLine, panel: els.panelLine },
+  ];
+  for (const t of tabs) {
+    if (!t.btn || !t.panel) continue;
+    const isTarget = t.btn === targetBtn;
+    t.btn.classList.toggle("is-active", isTarget);
+    t.btn.setAttribute("aria-selected", String(isTarget));
+    t.panel.classList.toggle("is-hidden", !isTarget);
+  }
+  if (targetBtn === els.tabLine) {
+    loadLineStatus();
+  }
+}
 
-  els.panelChat.classList.remove("is-hidden");
-  els.panelTts.classList.add("is-hidden");
+els.tabChat.addEventListener("click", () => {
+  switchTab(els.tabChat, els.panelChat);
   els.chatInput.focus();
 });
 
 els.tabTts.addEventListener("click", () => {
-  els.tabTts.classList.add("is-active");
-  els.tabTts.setAttribute("aria-selected", "true");
-  els.tabChat.classList.remove("is-active");
-  els.tabChat.setAttribute("aria-selected", "false");
-
-  els.panelTts.classList.remove("is-hidden");
-  els.panelChat.classList.add("is-hidden");
+  switchTab(els.tabTts, els.panelTts);
   els.ttsText.focus();
 });
+
+if (els.tabLine) {
+  els.tabLine.addEventListener("click", () => {
+    switchTab(els.tabLine, els.panelLine);
+  });
+}
+
+/* ---------- LINE 育成パネル管理 ---------- */
+
+async function loadLineStatus() {
+  try {
+    const res = await fetch("/api/line/status");
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (els.lineBadge) {
+      if (data.configured) {
+        els.lineBadge.textContent = "LINE: 連携済";
+        els.lineBadge.className = "badge badge-success";
+      } else {
+        els.lineBadge.textContent = "LINE: 未設定";
+        els.lineBadge.className = "badge badge-warn";
+      }
+    }
+
+    if (els.lineConfigStatus) {
+      els.lineConfigStatus.textContent = data.configured ? "連携中（準備OK）" : "未設定 (.env確認)";
+      els.lineConfigStatus.style.color = data.configured ? "#06c755" : "var(--warn)";
+    }
+    if (els.lineTotalCount) els.lineTotalCount.textContent = `${data.total_logs} 件`;
+    if (els.lineUnlearnedCount) els.lineUnlearnedCount.textContent = `${data.unlearned_logs} 件`;
+    if (els.lineLogsBadge) els.lineLogsBadge.textContent = `${data.total_logs} 件`;
+
+    // Webhook URL の表示（現在のホストから自動生成）
+    if (els.webhookUrlCode) {
+      const url = `${window.location.origin}/api/line/webhook`;
+      els.webhookUrlCode.textContent = url;
+    }
+
+    renderLineLogs(data.recent_logs || []);
+  } catch (e) {
+    console.warn("LINEステータス取得失敗:", e);
+  }
+}
+
+function renderLineLogs(logs) {
+  if (!els.lineLogsList) return;
+  els.lineLogsList.innerHTML = "";
+
+  if (!logs || logs.length === 0) {
+    els.lineLogsList.innerHTML = '<div class="empty-state">まだLINEからの会話ログがありません。LINEで話しかけるとここにリアルタイムで蓄積されます。</div>';
+    return;
+  }
+
+  // 新しい順に表示
+  const reversed = [...logs].reverse();
+  for (const item of reversed) {
+    const card = document.createElement("div");
+    card.className = "line-log-card";
+
+    const userRow = document.createElement("div");
+    userRow.className = "log-row-user";
+    userRow.innerHTML = `<span class="log-tag log-tag-user">拓さん</span> <span>${escapeHtml(item.user_message)}</span>`;
+
+    const aiRow = document.createElement("div");
+    aiRow.className = "log-row-ai";
+    aiRow.innerHTML = `<span class="log-tag log-tag-ai">AI</span> <span>${escapeHtml(item.ai_reply)}</span>`;
+
+    const metaFoot = document.createElement("div");
+    metaFoot.className = "log-meta-foot";
+
+    const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "";
+    const statusClass = item.learned ? "learned" : "unlearned";
+    const statusText = item.learned ? "学習済" : "未学習";
+
+    metaFoot.innerHTML = `<span>${timeStr}</span> <span class="status-pill ${statusClass}">${statusText}</span>`;
+
+    card.append(userRow, aiRow, metaFoot);
+    els.lineLogsList.append(card);
+  }
+}
+
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+if (els.lineRefreshBtn) {
+  els.lineRefreshBtn.addEventListener("click", () => {
+    loadLineStatus();
+    showToast("LINE会話ログを更新しました");
+  });
+}
+
+if (els.copyWebhookBtn && els.webhookUrlCode) {
+  els.copyWebhookBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(els.webhookUrlCode.textContent).then(() => {
+      showToast("Webhook URL をコピーしました！");
+    }).catch(() => {
+      showToast("コピーに失敗しました。直接選択してコピーしてください。");
+    });
+  });
+}
+
+if (els.lineLearnBtn) {
+  els.lineLearnBtn.addEventListener("click", async () => {
+    els.lineLearnBtn.disabled = true;
+    els.lineLearnBtn.classList.add("is-loading");
+    els.lineLearnBtn.querySelector(".btn-label").textContent = "AI人格を学習・更新中...";
+
+    try {
+      const res = await fetch("/api/line/learn", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "学習に失敗しました");
+
+      showToast(data.message || "LINEの会話からAI人格を学習・更新しました！");
+      await loadLineStatus();
+      await loadPersona();
+    } catch (e) {
+      showToast(e.message);
+    } finally {
+      els.lineLearnBtn.disabled = false;
+      els.lineLearnBtn.classList.remove("is-loading");
+      els.lineLearnBtn.querySelector(".btn-label").textContent = "✨ LINE会話からAI人格を学習・更新";
+    }
+  });
+}
 
 /* ---------- オーディオキュー管理（ストリーミング連続再生） ---------- */
 
@@ -883,4 +1034,5 @@ resizeCanvas();
 requestAnimationFrame(draw);
 loadConfig();
 loadVoices();
+loadLineStatus();
 els.chatInput.focus();
