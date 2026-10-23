@@ -665,9 +665,11 @@ def static_files(path):
 # ---------- エントリポイント ----------
 
 def main() -> None:
+    default_port = int(os.getenv("PORT", 5000))
+    default_host = "0.0.0.0" if os.getenv("PORT") else "127.0.0.1"
     parser = argparse.ArgumentParser(description="クローン音声の読み上げ & AI対話 Web アプリ")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--host", default=default_host)
+    parser.add_argument("--port", type=int, default=default_port)
     parser.add_argument("--no-browser", action="store_true", help="ブラウザを自動で開かない")
     args = parser.parse_args()
 
