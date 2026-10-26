@@ -1,0 +1,7 @@
+# 顔を動かすサービス（PC-A）の共通部分。Ditto / LivePortrait の依存は README の手順で別に入れる
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.12
+# テスト用
+httpx>=0.27
+pytest>=8

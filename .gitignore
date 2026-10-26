@@ -3,3 +3,15 @@ voices.json
 output/
 .venv/
 __pycache__/
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# 顔写真・DB（個人情報）は Git に上げない
+data/
+
+# MediaPipe WASM は postinstall で node_modules からコピーする
+apps/web/public/mediapipe/wasm/

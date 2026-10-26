@@ -1,0 +1,12 @@
+{
+  "name": "mirai-souzoutenn",
+  "private": true,
+  "packageManager": "pnpm@10.34.9",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "start": "pnpm --filter web start",
+    "test": "pnpm --filter web test",
+    "typecheck": "pnpm --filter web typecheck"
+  }
+}

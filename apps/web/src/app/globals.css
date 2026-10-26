@@ -1,0 +1,210 @@
+@import "tailwindcss";
+
+/* 2126年の記憶アーカイブ端末：暗い背景・細い線・半透明パネル・等幅の数字 */
+@theme {
+  --color-void: #05080d;
+  --color-panel: rgb(14 22 32 / 0.72);
+  --color-line: rgb(120 200 230 / 0.18);
+  --color-line-strong: rgb(120 200 230 / 0.42);
+  --color-ink: #d8e6ee;
+  --color-ink-dim: #7f95a3;
+  --color-holo: #7fe3ff;
+  --color-ok: #6be0a8;
+  --color-warn: #f2c25c;
+  --color-ng: #ff7a7a;
+
+  /* Webフォントは使わない（オフラインで動かすため）。OS 標準のフォントを使う */
+  --font-sans: "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", "SFMono-Regular", "Menlo", ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--color-void);
+    background-image:
+      radial-gradient(ellipse at 50% -20%, rgb(60 140 180 / 0.12), transparent 60%),
+      linear-gradient(var(--color-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+    background-size: 100% 100%, 48px 48px, 48px 48px;
+    background-attachment: fixed;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+  }
+  :focus-visible {
+    outline: 1px solid var(--color-holo);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .panel {
+    border: 1px solid var(--color-line);
+    background: var(--color-panel);
+    backdrop-filter: blur(6px);
+    border-radius: 4px;
+  }
+  .label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink-dim);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 3px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.875rem;
+    color: var(--color-ink);
+    transition: background-color 120ms, border-color 120ms;
+  }
+  .btn:hover:not(:disabled) {
+    background: rgb(127 227 255 / 0.08);
+    border-color: var(--color-holo);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    border-color: var(--color-holo);
+    color: var(--color-holo);
+  }
+  .btn-danger {
+    border-color: rgb(255 122 122 / 0.5);
+    color: var(--color-ng);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: rgb(255 122 122 / 0.08);
+    border-color: var(--color-ng);
+  }
+  .input {
+    border: 1px solid var(--color-line-strong);
+    border-radius: 3px;
+    background: rgb(0 0 0 / 0.3);
+    padding: 0.45rem 0.7rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* ---- 展示画面：ホログラム表示（顔の判別を邪魔しない強さに抑える） ---- */
+@layer components {
+  .holo-frame {
+    isolation: isolate;
+  }
+  .holo-face {
+    object-fit: cover;
+    /* 正方形の縁を背景に溶かす */
+    mask-image: radial-gradient(ellipse 50% 54% at 50% 48%, #000 62%, transparent 100%);
+    filter: saturate(0.85) contrast(1.04) brightness(1.03);
+  }
+  .holo-outline {
+    fill: none;
+    stroke: rgb(127 227 255 / 0.28);
+    stroke-width: 0.25;
+  }
+  .holo-outline-glow {
+    fill: none;
+    stroke: rgb(127 227 255 / 0.45);
+    stroke-width: 1.2;
+  }
+  .holo-scanlines {
+    background:
+      repeating-linear-gradient(0deg, rgb(127 227 255 / 0.07) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at 50% 45%, rgb(127 227 255 / 0.06), transparent 65%);
+    mix-blend-mode: screen;
+    mask-image: radial-gradient(ellipse 52% 56% at 50% 48%, #000 55%, transparent 100%);
+  }
+  /* ゆっくり下へ流れる明るい帯 */
+  .holo-animated .holo-scanlines::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: -20%;
+    height: 14%;
+    background: linear-gradient(to bottom, transparent, rgb(127 227 255 / 0.07), transparent);
+    animation: holo-band 7s linear infinite;
+  }
+  /* わずかなちらつき（ときどき一瞬だけ暗くなる） */
+  .holo-animated {
+    animation: holo-flicker 5.3s steps(1, end) infinite;
+  }
+}
+
+@keyframes holo-band {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(850%);
+  }
+}
+
+@keyframes holo-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  41% {
+    opacity: 0.94;
+  }
+  42% {
+    opacity: 1;
+  }
+  77% {
+    opacity: 0.97;
+  }
+  78% {
+    opacity: 1;
+  }
+  79% {
+    opacity: 0.95;
+  }
+  80% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-animated,
+  .holo-animated .holo-scanlines::after {
+    animation: none;
+  }
+}
+
+/* 肩から上の切り抜き：下端（胸のあたり）を背景に溶かす */
+@layer components {
+  .holo-bust {
+    object-fit: contain;
+    mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+    filter: saturate(0.85) contrast(1.04) brightness(1.03);
+  }
+  /* 呼吸：肩を支点に、ごくわずかに拡大縮小する */
+  .holo-breathe {
+    transform-origin: 50% 100%;
+    animation: holo-breathe 4.6s ease-in-out infinite;
+  }
+}
+
+@keyframes holo-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.006) translateY(-0.15%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-breathe {
+    animation: none;
+  }
+}
