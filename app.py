@@ -688,7 +688,14 @@ from line_bot import (
     send_proactive_question_to_users,
     start_proactive_scheduler,
     import_line_chat_history,
+    get_topic_categories,
 )
+
+
+@app.get("/api/line/topics")
+def api_line_topics():
+    """利用可能なインタビュー話題カテゴリ一覧を返す"""
+    return jsonify(topics=get_topic_categories())
 
 
 @app.get("/api/line/status")
@@ -763,7 +770,7 @@ def api_line_webhook():
 
 @app.post("/api/line/proactive")
 def api_line_proactive():
-    """Geminiが過去の会話からまだ知らないことを考え、自発的にLINEで質問を送信"""
+    """Geminiが多彩な話題カテゴリから自発的にLINEで質問を送信"""
     secret, token = get_line_credentials()
     if not secret or not token:
         return error("LINE のクレデンシャルが設定されていません", 400)
@@ -772,7 +779,10 @@ def api_line_proactive():
     if not gemini_key:
         return error("Gemini API キーが設定されていません", 400)
 
-    result = send_proactive_question_to_users(gemini_key, token)
+    data = request.get_json(silent=True) or {}
+    category_id = data.get("category_id")
+
+    result = send_proactive_question_to_users(gemini_key, token, category_id=category_id)
     if not result.get("success"):
         return error(result.get("message", "自発質問の送信に失敗しました"), 400)
 

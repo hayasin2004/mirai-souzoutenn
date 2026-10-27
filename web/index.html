@@ -139,10 +139,24 @@
           </div>
 
           <div class="line-actions-row">
-            <button id="line-proactive-btn" class="btn-primary btn-proactive" type="button" title="Geminiが未開拓の質問を考えてLINEへ直接送信します">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-label">💡 拓さんに自発的に質問する（話題を振る）</span>
-            </button>
+            <div class="proactive-control-group">
+              <select id="line-topic-select" class="topic-select" title="質問する話題テーマを選択">
+                <option value="">🎲 おまかせ（自動ローテーション）</option>
+                <option value="school_tech">🏫 学校・プログラミング・将来</option>
+                <option value="daily_habits">☕ 日常の習慣・こだわり</option>
+                <option value="food_gourmet">🍜 食生活・グルメ</option>
+                <option value="friends_relationships">👥 人間関係・友達</option>
+                <option value="entertainment_culture">🎮 エンタメ・音楽・ゲーム</option>
+                <option value="values_emotion">🔥 価値観・喜怒哀楽</option>
+                <option value="shopping_lifestyle">🛍 買い物・持ち物</option>
+                <option value="memories_past">🎒 過去の思い出・学生時代</option>
+                <option value="hypothetical_future">✨ もしも・究極の選択</option>
+              </select>
+              <button id="line-proactive-btn" class="btn-primary btn-proactive" type="button" title="Geminiが質問を考えてLINEへ直接送信します">
+                <span class="btn-spinner" aria-hidden="true"></span>
+                <span class="btn-label">💡 質問する（話題を振る）</span>
+              </button>
+            </div>
             <button id="line-learn-btn" class="btn-primary btn-learn" type="button" title="蓄積された会話からpersona.txtを自動更新します">
               <span class="btn-spinner" aria-hidden="true"></span>
               <span class="btn-label">✨ 会話からAI人格を学習・更新</span>

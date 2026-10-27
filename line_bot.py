@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import threading
 import time
 from datetime import datetime
@@ -19,11 +20,130 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 LOGS_FILE = DATA_DIR / "line_logs.json"
+USERS_FILE = DATA_DIR / "line_users.json"
+TOPIC_HISTORY_FILE = DATA_DIR / "topic_history.json"
 PERSONA_FILE = BASE_DIR / "persona.txt"
 
 load_dotenv(BASE_DIR / ".env")
 
 _logs_lock = threading.Lock()
+
+# 分身AIの人格を豊かにするための多彩なインタビュー話題カテゴリ
+INTERVIEW_TOPIC_CATEGORIES: List[Dict[str, str]] = [
+    {
+        "id": "school_tech",
+        "name": "学校・プログラミング・将来",
+        "hints": "専門学校の授業や課題、プログラミングで面白いこと・苦戦してる言語、作ってみたいアプリ、将来の進路や就職のイメージ",
+        "sample": "専門学校の授業で最近一番面白いやつって何？",
+    },
+    {
+        "id": "daily_habits",
+        "name": "日常の習慣・ルーティン・こだわり",
+        "hints": "朝起きて一番にすること、夜寝る前の癖、部屋の配置やこだわり、出かける時の持ち物、リフレッシュ方法",
+        "sample": "拓さんって朝起きて一番に何する派？二度寝しちゃう？",
+    },
+    {
+        "id": "food_gourmet",
+        "name": "食生活・グルメ・飲食のこだわり",
+        "hints": "ラーメン以外の好きなご飯、苦手・食べられないもの、コンビニでつい買っちゃうもの、自炊事情、思い出の味",
+        "sample": "一蘭以外で、最近めっちゃ美味しかったご飯とかある？",
+    },
+    {
+        "id": "friends_relationships",
+        "name": "人間関係・友人・家族",
+        "hints": "友達と遊ぶ時の定番パターン、仲良くなりやすい人の特徴、休日に誰と過ごすことが多いか、連絡の頻度やLINEの返し方",
+        "sample": "友達と遊ぶ時って、ノリで決めるタイプ？それとも計画立てる？",
+    },
+    {
+        "id": "entertainment_culture",
+        "name": "エンタメ・音楽・動画・ゲーム",
+        "hints": "好きな音楽やよく聴くアーティスト、YouTubeで見るチャンネル、最近ハマったアニメ・映画、にゃんこ大戦争以外のゲーム",
+        "sample": "YouTubeで気づいたら見ちゃう動画のジャンルとかある？",
+    },
+    {
+        "id": "values_emotion",
+        "name": "価値観・喜怒哀楽・性格",
+        "hints": "最近一番爆笑したこと、どうしても許せない・イラッとする瞬間、テンションが上がる瞬間、大事にしている考え方",
+        "sample": "最近一番テンション上がったことって何だった？",
+    },
+    {
+        "id": "shopping_lifestyle",
+        "name": "買い物・持ち物・ファッション",
+        "hints": "最近買って一番良かったもの、服を選ぶ時のこだわり、つい無駄遣いしちゃうもの、ずっと欲しいと思っている物",
+        "sample": "今年買ったものの中で『これ買って大正解だった！』ってやつある？",
+    },
+    {
+        "id": "memories_past",
+        "name": "過去の思い出・学生時代",
+        "hints": "小中高の部活動や学校行事の思い出、子供の頃夢中だった遊び、昔と今で変わったところ、学生時代の面白エピソード",
+        "sample": "子供の頃ってどんな遊びに一番ハマってた？",
+    },
+    {
+        "id": "hypothetical_future",
+        "name": "もしも・究極の選択",
+        "hints": "もし1億円当たったらどうする？、1週間完全フリーでどこでも行けるならどこ行く？、超能力が1つ手に入るなら何がいい？",
+        "sample": "もし1週間完全フリーでどこでも行っていいなら何する？",
+    },
+]
+
+
+def get_topic_categories() -> List[Dict[str, str]]:
+    """話題カテゴリ一覧を返す"""
+    return INTERVIEW_TOPIC_CATEGORIES
+
+
+def load_topic_history() -> Dict[str, Any]:
+    """過去の話題選定履歴を読み込む"""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not TOPIC_HISTORY_FILE.exists():
+        return {"recent_topic_ids": [], "topic_counts": {}}
+    try:
+        with open(TOPIC_HISTORY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"recent_topic_ids": [], "topic_counts": {}}
+
+
+def pick_next_topic(category_id: Optional[str] = None) -> Dict[str, str]:
+    """
+    指定されたカテゴリ、または直近使われていないカテゴリから次の話題を選出・履歴記録
+    """
+    history = load_topic_history()
+    recent_ids = history.get("recent_topic_ids", [])
+    counts = history.get("topic_counts", {})
+
+    # 特定のカテゴリが指定された場合
+    if category_id:
+        target = next((c for c in INTERVIEW_TOPIC_CATEGORIES if c["id"] == category_id), None)
+        if target:
+            selected = target
+        else:
+            selected = random.choice(INTERVIEW_TOPIC_CATEGORIES)
+    else:
+        # 直近3回で使われていない候補を抽出
+        excluded_ids = set(recent_ids[-3:]) if len(recent_ids) >= 3 else set(recent_ids)
+        candidates = [c for c in INTERVIEW_TOPIC_CATEGORIES if c["id"] not in excluded_ids]
+        if not candidates:
+            candidates = INTERVIEW_TOPIC_CATEGORIES
+
+        # 使用回数が少ないものを優先、同数ならランダム
+        candidates_sorted = sorted(candidates, key=lambda c: (counts.get(c["id"], 0), random.random()))
+        selected = candidates_sorted[0]
+
+    # 履歴を更新
+    recent_ids.append(selected["id"])
+    if len(recent_ids) > 10:
+        recent_ids = recent_ids[-10:]
+    history["recent_topic_ids"] = recent_ids
+    history["topic_counts"][selected["id"]] = counts.get(selected["id"], 0) + 1
+
+    try:
+        with open(TOPIC_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[WARN] トピック履歴保存失敗: {e}")
+
+    return selected
 
 
 def get_line_credentials() -> tuple[Optional[str], Optional[str]]:
@@ -186,12 +306,23 @@ def push_line_message(user_id: str, text: str, access_token: str) -> bool:
         return False
 
 
-def generate_proactive_question(gemini_api_key: str, user_id: Optional[str] = None) -> str:
+def generate_proactive_question(
+    gemini_api_key: str,
+    user_id: Optional[str] = None,
+    category_id: Optional[str] = None,
+) -> str:
     """
-    現在のpersona.txtと過去の会話ログを分析し、「まだ知らないこと」「もっと深く知りたいこと」を自発的に尋ねる質問文を生成
+    現在のpersona.txtと過去の会話ログを分析し、
+    定期的に異なる話題カテゴリを選んで新鮮な質問文を生成する
     """
     from google import genai
     from google.genai import types
+
+    # 話題カテゴリを決定（ローテーションまたは指定）
+    topic = pick_next_topic(category_id)
+    topic_name = topic["name"]
+    topic_hints = topic["hints"]
+    topic_sample = topic.get("sample", "最近どんなことあった？")
 
     # 現在のペルソナ情報
     current_persona = ""
@@ -226,15 +357,20 @@ def generate_proactive_question(gemini_api_key: str, user_id: Optional[str] = No
         "【最近のLINE会話履歴】\n"
         f"{recent_logs_text if recent_logs_text else '（まだ会話履歴はありません）'}\n\n"
         f"【現在の時間帯】: {time_hint}（{now_hour}時頃）\n\n"
+        f"【今回の質問テーマ（最重要）】\n"
+        f"カテゴリ: 『{topic_name}』\n"
+        f"着眼点・キーワード: {topic_hints}\n"
+        f"質問のニュアンス例: {topic_sample}\n\n"
         "【あなたのタスク】\n"
-        "拓さんについて『まだ詳しくわかっていないこと』や『もっと深掘りしたいエピソード（日頃のこだわり、最近あったこと、好きなものの細かい話、人間関係、口癖、価値観など）』を1つ見つけてください。\n"
-        "友達としてLINEでふと思いついたように話しかける、自然な質問メッセージを作成してください。\n\n"
-        "【ルール】\n"
+        f"上記の『{topic_name}』のテーマに沿って、拓さんの本音や日常のエピソードを引き出す自然なLINE質問を1つ作成してください。\n"
+        "友達としてLINEでふと思いついたように気さくに話しかけてください。\n\n"
+        "【絶対ルール】\n"
         "1. 親しい友達のような気さくなタメ口（敬語は絶対に使わない）。\n"
         "2. 必ず1文〜2文（50文字以内）の超短文にすること。\n"
         "3. 絵文字やマークダウン記号は使わず、自然な話し言葉にすること。\n"
-        "4. 時間帯に合った自然な切り出し（『そういえば〜』『ふと思ったんだけど〜』『おつかれ！〜』など）にすること。\n"
-        "5. 質問文そのものだけを出力してください。"
+        "4. 直近の会話履歴ですでに話した話題（例: ラーメンやサウナ等で最近話したこと）とは被らないようにすること。\n"
+        "5. 時間帯に合った自然な切り出し（『そういえば〜』『ふと思ったんだけど〜』『おつかれ！〜』など）にすること。\n"
+        "6. 質問文そのものだけを出力してください。"
     )
 
     client = genai.Client(api_key=gemini_api_key)
@@ -245,21 +381,26 @@ def generate_proactive_question(gemini_api_key: str, user_id: Optional[str] = No
                 model=model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.85,
+                    temperature=0.88,
                     max_output_tokens=100,
                 ),
             )
             if resp and resp.text:
                 clean_q = resp.text.strip().replace("「", "").replace("」", "").replace('"', "")
+                print(f"[PROACTIVE] カテゴリ【{topic_name}】から質問生成: \"{clean_q}\"", flush=True)
                 return clean_q
         except Exception as e:
             print(f"[WARN] 自発質問生成リトライ ({model_name}): {e}")
             continue
 
-    return "そういえば拓さん、休みの日はいつも何時くらいに起きてるの？"
+    return topic_sample
 
 
-def send_proactive_question_to_users(gemini_api_key: str, access_token: str) -> Dict[str, Any]:
+def send_proactive_question_to_users(
+    gemini_api_key: str,
+    access_token: str,
+    category_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """登録されているアクティブユーザー全員（または最新のユーザー）に自発的な質問を送信"""
     users = get_active_line_users()
     if not users:
@@ -269,7 +410,7 @@ def send_proactive_question_to_users(gemini_api_key: str, access_token: str) -> 
             "sent_count": 0,
         }
 
-    question = generate_proactive_question(gemini_api_key)
+    question = generate_proactive_question(gemini_api_key, category_id=category_id)
     sent_count = 0
 
     for uid in users:
@@ -282,7 +423,7 @@ def send_proactive_question_to_users(gemini_api_key: str, access_token: str) -> 
     if sent_count > 0:
         return {
             "success": True,
-            "message": f"拓さんのLINEに自発的な質問を送信しました！\n質問内容：「{question}」",
+            "message": f"拓さんのLINEに質問を送信しました！\n質問内容：「{question}」",
             "question": question,
             "sent_count": sent_count,
         }
@@ -296,27 +437,52 @@ def send_proactive_question_to_users(gemini_api_key: str, access_token: str) -> 
 
 def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: str) -> str:
     """
-    本人（市川拓さん）から自然にエピソードや口癖を引き出すインタビュー返信を生成
+    本人（市川拓さん）から自然にエピソードや口癖を引き出すインタビュー返信を生成。
+    同じ話題が続いた場合や一段落した場合は、スムーズに別の話題に切り替えて多角的な情報を引き出す。
     """
     from google import genai
     from google.genai import types
 
-    # 直近の会話文脈を取得
+    # 直近の会話文脈を取得（最大6往復）
     logs = load_line_logs()
-    user_recent_logs = [l for l in logs if l.get("user_id") == user_id][-4:]
+    user_recent_logs = [l for l in logs if l.get("user_id") == user_id][-6:]
 
-    client = genai.Client(api_key=gemini_api_key)
+    # 次の候補となるトピックを事前に取得（話題転換用）
+    next_topic = pick_next_topic()
+
+    # ラリーの長さや返答の短さから話題転換（トピックシフト）すべきかを判定
+    recent_len = len(user_recent_logs)
+    is_short = len(user_message.strip()) <= 6 or any(
+        w in user_message for w in ["うん", "そう", "ない", "普通", "とくに", "特に", "まあね", "微妙", "わからない", "知らん"]
+    )
+    should_switch = (recent_len >= 3) or is_short
+
+    if should_switch:
+        topic_instruction = (
+            f"【話題の切り替えルール（重要）】\n"
+            f"現在の話題は十分深掘りできたか、相手の返事が一段落しました。\n"
+            f"相手の発言を「なるほどね！」「そうなんだ（笑）」のように軽く受け止めて共感した上で、\n"
+            f"『あ、そういえばさ、全然話変わるんだけど〜』『ちなみに拓さんって〜』のように、\n"
+            f"自然に別の新しい話題（テーマ: 【{next_topic['name']}】、着眼点: {next_topic['hints']}）に話を切り替えて質問してください。\n"
+            f"同じ話題の深掘りを続けず、テンポよく別の話題に移ってください。"
+        )
+    else:
+        topic_instruction = (
+            "【話題の深掘りルール】\n"
+            "相手の発言を肯定・共感しつつ、「それって普段もよく行くの？」「どんなところが好き？」「他には？」など、"
+            "自然にその話をもう一歩広げる一言質問を添えてください。"
+        )
 
     system_instruction = (
         "あなたはユーザー（市川 拓さん）の『分身AI』を作るための、親しみやすい相棒・専属インタビュアーです。\n"
         "【目的】\n"
         "ユーザーとの自然な日常会話を通じて、本人の「口癖」「価値観」「日常のエピソード」「好きなことの具体的な話」を引き出すこと。\n\n"
         "【対話ルール】\n"
-        "1. 気さくな友達のように、フランクなタメ口で話してください（敬語は不要）。\n"
-        "2. 相手の発言を肯定・共感しつつ、「それって普段もよく行くの？」「どんなところが好き？」「他には？」など、"
-        "自然に話を広げる一言質問を添えてください。\n"
+        "1. 気さくな友達のように、フランクなタメ口で話してください（敬語は絶対に使わない）。\n"
+        f"2. {topic_instruction}\n"
         "3. テンポよく返せるよう、必ず1文〜2文（60文字以内）の短文で返信してください。\n"
-        "4. 説教やアドバイスは不要です。相手に気持ちよく喋らせる聞き役に徹してください。"
+        "4. 説教やアドバイスは不要です。相手に気持ちよく喋らせる聞き役に徹してください。\n"
+        "5. 絵文字やマークダウン記号は使わず、自然な話し言葉にしてください。"
     )
 
     contents = []
@@ -326,6 +492,8 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
 
     contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_message)]))
 
+    client = genai.Client(api_key=gemini_api_key)
+
     # 最速モデルで即座に返信
     for model_name in ["gemini-3.5-flash-lite", "gemini-flash-latest"]:
         try:
@@ -334,7 +502,7 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
-                    temperature=0.8,
+                    temperature=0.82,
                     max_output_tokens=120,
                 ),
             )
@@ -344,7 +512,7 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
             print(f"[WARN] LINE返答生成リトライ ({model_name}): {e}")
             continue
 
-    return "なるほどね！もっと詳しく教えてほしいな。"
+    return "なるほどね！そういえば最近何かハマってることとかある？"
 
 
 def update_persona_from_logs(gemini_api_key: str) -> Dict[str, Any]:

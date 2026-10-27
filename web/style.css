@@ -829,13 +829,36 @@ kbd {
   flex-wrap: wrap;
   gap: 10px;
 }
+.proactive-control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1.4;
+  min-width: 320px;
+}
+.topic-select {
+  flex: 1;
+  background: hsl(232 24% 15%);
+  border: 1px solid hsl(232 20% 28%);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+.topic-select:focus {
+  border-color: hsl(262 80% 65%);
+}
 .btn-proactive {
-  flex: 1.2;
-  min-width: 220px;
+  flex: 1;
+  min-width: 170px;
   background: linear-gradient(135deg, hsl(262 80% 55%), hsl(280 85% 60%));
   border-color: hsl(262 80% 60%);
   color: #fff;
   font-weight: 600;
+  white-space: nowrap;
 }
 .btn-proactive:hover:not(:disabled) {
   background: linear-gradient(135deg, hsl(262 80% 50%), hsl(280 85% 55%));

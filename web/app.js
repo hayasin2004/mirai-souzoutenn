@@ -57,6 +57,7 @@ const els = {
   lineTotalCount: $("line-total-count"),
   lineUnlearnedCount: $("line-unlearned-count"),
   lineUsersCount: $("line-users-count"),
+  lineTopicSelect: $("line-topic-select"),
   lineProactiveBtn: $("line-proactive-btn"),
   lineLearnBtn: $("line-learn-btn"),
   lineRefreshBtn: $("line-refresh-btn"),
@@ -332,19 +333,25 @@ if (els.lineProactiveBtn) {
     els.lineProactiveBtn.classList.add("is-loading");
     els.lineProactiveBtn.querySelector(".btn-label").textContent = "Geminiが話題を考案中...";
 
+    const categoryId = els.lineTopicSelect ? els.lineTopicSelect.value : "";
+
     try {
-      const res = await fetch("/api/line/proactive", { method: "POST" });
+      const res = await fetch("/api/line/proactive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category_id: categoryId }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "自発質問の送信に失敗しました");
 
-      showToast(data.message || "拓さんのLINEに自発的な質問を送信しました！");
+      showToast(data.message || "拓さんのLINEに質問を送信しました！");
       await loadLineStatus();
     } catch (e) {
       showToast(e.message);
     } finally {
       els.lineProactiveBtn.disabled = false;
       els.lineProactiveBtn.classList.remove("is-loading");
-      els.lineProactiveBtn.querySelector(".btn-label").textContent = "💡 拓さんに自発的に質問する（話題を振る）";
+      els.lineProactiveBtn.querySelector(".btn-label").textContent = "💡 質問する（話題を振る）";
     }
   });
 }
