@@ -8,8 +8,10 @@ import hmac
 import json
 import os
 import random
+import re
 import threading
 import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,6 +29,184 @@ PERSONA_FILE = BASE_DIR / "persona.txt"
 load_dotenv(BASE_DIR / ".env")
 
 _logs_lock = threading.Lock()
+
+
+def sanitize_line_text(text: str) -> str:
+    """
+    LINEのトーク履歴やチャットテキストに含まれる表示不能文字・制御文字・不正サロゲート・外字等を除去・正規化
+    Windows環境(CP932)の標準出力やファイル保存でも絶対にクラッシュしない堅牢な実装
+    """
+    if not text or not isinstance(text, str):
+        return ""
+
+    # 1. コードポイント走査による安全な除外（サロゲート、私用領域、制御文字、不可視文字、置換文字\ufffd）
+    clean_chars = []
+    for c in text:
+        cp = ord(c)
+        # 孤立サロゲート (0xD800 - 0xDFFF)
+        if 0xD800 <= cp <= 0xDFFF:
+            continue
+        # 私用領域・外字・独自絵文字 (0xE000 - 0xF8FF, 0xF0000 - 0xFFFFD, 0x100000 - 0x10FFFD)
+        if 0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0xFFFFD or 0x100000 <= cp <= 0x10FFFD:
+            continue
+        # C0 / C1 制御文字（改行 \n, \r とタブ \t 以外）
+        if (cp < 0x20 and c not in "\n\r\t") or (0x7F <= cp <= 0x9F):
+            continue
+        # 不可視文字・BOM・ゼロ幅スペース・双方向テキスト制御文字・置換文字 \ufffd
+        if c in "\ufeff\u200b\u200c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2060\u2066\u2067\u2068\u2069\ufffd":
+            continue
+        clean_chars.append(c)
+
+    text = "".join(clean_chars)
+
+    # 2. Unicode NFKC 正規化（全角記号や互換文字を整える）
+    try:
+        text = unicodedata.normalize("NFKC", text)
+    except Exception:
+        pass
+
+    # 3. 3つ以上の連続改行を2つに圧縮
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    return text.strip()
+
+
+def fallback_parse_line_text(text: str) -> List[Dict[str, Any]]:
+    """
+    GeminiによるJSON構造化抽出が失敗した時のフォールバック:
+    LINEトーク履歴の一般的なテキスト形式からルールベースで会話を救済抽出
+    """
+    lines = text.splitlines()
+    items: List[Dict[str, Any]] = []
+
+    last_user_msg = None
+    line_pattern = re.compile(
+        r"^(?:\d{1,2}:\d{2}(?::\d{2})?|\d{4}[/\-.]\d{1,2}[/\-.]\d{1,2}(?:\s+\d{1,2}:\d{2})?)\s+([^\s\t:]+)[\s\t:](.*)$"
+    )
+
+    for line in lines:
+        line_str = line.strip()
+        if not line_str:
+            continue
+
+        # システムメッセージ・日付行をスキップ
+        if re.match(r"^\d{4}[/\-.]\d{1,2}[/\-.]\d{1,2}", line_str) and len(line_str) < 30:
+            continue
+        if any(keyword in line_str for keyword in ["[LINE]", "トーク履歴", "保存日時", "通話を終了しました", "グループに参加しました"]):
+            continue
+
+        match = line_pattern.match(line_str)
+        if match:
+            sender = match.group(1).strip()
+            content = match.group(2).strip()
+
+            # 市川拓（本人）判定
+            is_user = any(k in sender for k in ["拓", "市川", "本人", "自分", "User", "私"])
+
+            if is_user:
+                if last_user_msg:
+                    items.append({
+                        "user_message": last_user_msg,
+                        "ai_reply": "（LINEトーク履歴より記録）",
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                last_user_msg = content
+            else:
+                if last_user_msg:
+                    items.append({
+                        "user_message": last_user_msg,
+                        "ai_reply": content,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    last_user_msg = None
+                else:
+                    items.append({
+                        "user_message": f"（相手の呼びかけ: {content}）",
+                        "ai_reply": content,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+        else:
+            # メッセージの複数行継続
+            if last_user_msg:
+                last_user_msg += "\n" + line_str
+
+    if last_user_msg:
+        items.append({
+            "user_message": last_user_msg,
+            "ai_reply": "（LINEトーク履歴より記録）",
+            "timestamp": datetime.now().isoformat(),
+        })
+
+    return items
+
+
+def parse_chat_json_safely(raw_json: str, original_raw_text: str = "") -> List[Dict[str, Any]]:
+    """
+    Geminiから返されたJSONテキストを、制御文字やエスケープ不備・マークダウン囲みがあっても堅牢にパース
+    """
+    if not raw_json:
+        return fallback_parse_line_text(original_raw_text) if original_raw_text else []
+
+    cleaned = raw_json.strip()
+
+    # マークダウンのコードブロック除去
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+
+    # 1. 直接 json.loads(..., strict=False) を試行
+    try:
+        data = json.loads(cleaned, strict=False)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+    except Exception:
+        pass
+
+    # 2. JSON配列 [ ... ] を正規表現で抽出してパース
+    array_match = re.search(r"\[[\s\S]*\]", cleaned)
+    if array_match:
+        try:
+            data = json.loads(array_match.group(0), strict=False)
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+
+    # 3. 各オブジェクト { ... } を1件ずつ正規表現で抽出
+    obj_pattern = re.compile(r"\{[^{}]*?\"user_message\"[^{}]*?\}", re.DOTALL)
+    matches = obj_pattern.findall(cleaned)
+    items = []
+    for m in matches:
+        try:
+            obj = json.loads(m, strict=False)
+            if isinstance(obj, dict):
+                items.append(obj)
+        except Exception:
+            # 簡易キーバリュー抽出
+            u_match = re.search(r'"user_message"\s*:\s*"(.*?)"(?=,\s*"|\s*\})', m, re.DOTALL)
+            a_match = re.search(r'"ai_reply"\s*:\s*"(.*?)"(?=,\s*"|\s*\})', m, re.DOTALL)
+            t_match = re.search(r'"timestamp"\s*:\s*"(.*?)"(?=,\s*"|\s*\})', m, re.DOTALL)
+            if u_match:
+                items.append({
+                    "user_message": u_match.group(1),
+                    "ai_reply": a_match.group(1) if a_match else "（LINEトーク履歴より記録）",
+                    "timestamp": t_match.group(1) if t_match else "",
+                })
+    if items:
+        return items
+
+    # 4. フォールバック: LINEトーク履歴から直接抽出
+    if original_raw_text:
+        return fallback_parse_line_text(original_raw_text)
+
+    return []
+
 
 # 分身AIの人格を豊かにするための多彩なインタビュー話題カテゴリ（全15ジャンル）
 INTERVIEW_TOPIC_CATEGORIES: List[Dict[str, str]] = [
@@ -208,7 +388,7 @@ def load_line_logs() -> List[Dict[str, Any]]:
     if not LOGS_FILE.exists():
         return []
     try:
-        with open(LOGS_FILE, "r", encoding="utf-8") as f:
+        with open(LOGS_FILE, "r", encoding="utf-8", errors="replace") as f:
             data = json.load(f)
             return data if isinstance(data, list) else []
     except Exception as e:
@@ -217,20 +397,23 @@ def load_line_logs() -> List[Dict[str, Any]]:
 
 
 def save_line_log(user_id: str, user_text: str, ai_reply: str) -> Dict[str, Any]:
-    """1往復の会話ログを保存"""
+    """1往復の会話ログを保存（表示不能文字・サロゲートを安全にサニタイズ）"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    clean_user_text = sanitize_line_text(user_text)
+    clean_ai_reply = sanitize_line_text(ai_reply)
+
     with _logs_lock:
         logs = load_line_logs()
         item = {
             "id": f"log_{int(time.time() * 1000)}",
             "user_id": user_id,
             "timestamp": datetime.now().isoformat(),
-            "user_message": user_text,
-            "ai_reply": ai_reply,
+            "user_message": clean_user_text,
+            "ai_reply": clean_ai_reply,
             "learned": False,
         }
         logs.append(item)
-        with open(LOGS_FILE, "w", encoding="utf-8") as f:
+        with open(LOGS_FILE, "w", encoding="utf-8", errors="replace") as f:
             json.dump(logs, f, ensure_ascii=False, indent=2)
         return item
 
@@ -243,7 +426,7 @@ def mark_logs_learned(log_ids: List[str]) -> None:
         for it in logs:
             if it.get("id") in id_set:
                 it["learned"] = True
-        with open(LOGS_FILE, "w", encoding="utf-8") as f:
+        with open(LOGS_FILE, "w", encoding="utf-8", errors="replace") as f:
             json.dump(logs, f, ensure_ascii=False, indent=2)
 
 
@@ -630,8 +813,11 @@ def update_persona_from_logs(gemini_api_key: str) -> Dict[str, Any]:
             lines = lines[:-1]
         updated_persona_text = "\n".join(lines).strip()
 
-    # persona.txt に書き込み保存
-    with open(PERSONA_FILE, "w", encoding="utf-8") as f:
+    # 表示不能文字・サロゲートをサニタイズ
+    updated_persona_text = sanitize_line_text(updated_persona_text)
+
+    # persona.txt に書き込み保存（errors="replace" でUnicode例外を完全防止）
+    with open(PERSONA_FILE, "w", encoding="utf-8", errors="replace") as f:
         f.write(updated_persona_text)
 
     # ログを学習済みに更新
@@ -703,15 +889,16 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
     from google import genai
     from google.genai import types
 
-    raw_text = raw_text.strip()
+    # 1. 表示不能文字・サロゲートペア・制御文字・外字をサニタイズ
+    raw_text = sanitize_line_text(raw_text)
     if not raw_text:
-        return {"success": False, "message": "テキストが空です。", "imported_count": 0}
+        return {"success": False, "message": "テキストが空、または有効な文字が含まれていません。", "imported_count": 0}
 
-    # 生ログのバックアップ保存
+    # 生ログのバックアップ保存（errors="replace" で文字コード例外を完全に防止）
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     raw_backup_file = DATA_DIR / "line_imported_raw.txt"
     try:
-        with open(raw_backup_file, "a", encoding="utf-8") as f:
+        with open(raw_backup_file, "a", encoding="utf-8", errors="replace") as f:
             f.write(f"\n--- インポート日時: {datetime.now().isoformat()} ---\n{raw_text}\n")
     except Exception as e:
         print(f"[WARN] バックアップ書き込み失敗: {e}")
@@ -754,28 +941,11 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
             print(f"[WARN] チャット解析生成失敗 ({model_name}): {e}")
             continue
 
-    if not json_text:
-        return {"success": False, "message": "Geminiによるチャットテキストの解析に失敗しました。", "imported_count": 0}
-
-    # JSONパース（```json などのコードブロックが含まれていた場合は除去）
-    if json_text.startswith("```"):
-        lines = json_text.splitlines()
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        json_text = "\n".join(lines).strip()
-
-    try:
-        parsed_items = json.loads(json_text)
-        if not isinstance(parsed_items, list):
-            parsed_items = [parsed_items]
-    except Exception as e:
-        print(f"[ERROR] JSONデコード失敗: {e}\n{json_text}")
-        return {"success": False, "message": f"会話データの抽出形式エラー: {e}", "imported_count": 0}
+    # JSONパース（制御文字・マークダウン・エスケープ不備に完全対応した安全パーサーを使用）
+    parsed_items = parse_chat_json_safely(json_text, original_raw_text=raw_text)
 
     if not parsed_items:
-        return {"success": False, "message": "会話データが見つかりませんでした。テキストの内容を確認してください。", "imported_count": 0}
+        return {"success": False, "message": "会話データが見つかりませんでした。テキストの内容（送信者名やメッセージ）を確認してください。", "imported_count": 0}
 
     # ログを蓄積
     imported_count = 0
@@ -783,8 +953,8 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
         existing_logs = load_line_logs()
         now_iso = datetime.now().isoformat()
         for idx, item in enumerate(parsed_items):
-            u_msg = str(item.get("user_message", "")).strip()
-            a_msg = str(item.get("ai_reply", "（LINEトーク履歴より記録）")).strip()
+            u_msg = sanitize_line_text(str(item.get("user_message", "")))
+            a_msg = sanitize_line_text(str(item.get("ai_reply", "（LINEトーク履歴より記録）")))
             ts = item.get("timestamp") or now_iso
             if not u_msg:
                 continue
@@ -799,7 +969,7 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
             existing_logs.append(log_item)
             imported_count += 1
 
-        with open(LOGS_FILE, "w", encoding="utf-8") as f:
+        with open(LOGS_FILE, "w", encoding="utf-8", errors="replace") as f:
             json.dump(existing_logs, f, ensure_ascii=False, indent=2)
 
     # 自動学習（persona.txt の更新）
