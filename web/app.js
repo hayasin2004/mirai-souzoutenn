@@ -42,12 +42,31 @@ const els = {
   historyList: $("history-list"),
   clearHistory: $("clear-history-btn"),
 
-  // 人格モーダル
+  // 人格モーダル & ペルソナ切替
+  personaBtn: $("persona-btn"),
+  personaSelect: $("persona-select"),
+  addPersonaBtn: $("add-persona-btn"),
+  lineCurrentPersonaName: $("line-current-persona-name"),
   dialog: $("persona-dialog"),
   closeDialogBtn: $("close-dialog-btn"),
   personaTextarea: $("persona-textarea"),
   savePersonaBtn: $("save-persona-btn"),
   personaStatus: $("persona-status"),
+
+  // 新規人物AI作成モーダル
+  newPersonaDialog: $("new-persona-dialog"),
+  closeNewPersonaBtn: $("close-new-persona-btn"),
+  formNewPersona: $("form-new-persona"),
+  npName: $("np-name"),
+  npNickname: $("np-nickname"),
+  npId: $("np-id"),
+  npFirstPerson: $("np-first-person"),
+  npAttribute: $("np-attribute"),
+  npPersonality: $("np-personality"),
+  npFavorites: $("np-favorites"),
+  npVoiceSelect: $("np-voice-select"),
+  npStatus: $("np-status"),
+  submitNewPersonaBtn: $("submit-new-persona-btn"),
 
   // LINE育成
   tabLine: $("tab-line"),
@@ -101,6 +120,8 @@ const STORAGE_KEY = "mirai-voice:last-voice";
 let maxLength = 1000;
 let history = []; // { id, text, voice, url, filename, createdAt }
 let chatHistory = []; // { role: "user" | "model", text: string }
+let currentPersonaId = "taku";
+let personasList = [];
 let activeId = null;
 let audioCtx = null;
 let analyser = null;
@@ -229,7 +250,7 @@ if (els.tabLine) {
 
 async function loadLineStatus() {
   try {
-    const res = await fetch("/api/line/status");
+    const res = await fetch("/api/line/status?person_id=" + encodeURIComponent(currentPersonaId));
     if (!res.ok) return;
     const data = await res.json();
 
@@ -339,12 +360,12 @@ if (els.lineProactiveBtn) {
       const res = await fetch("/api/line/proactive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ category_id: categoryId }),
+        body: JSON.stringify({ category_id: categoryId, person_id: currentPersonaId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "自発質問の送信に失敗しました");
 
-      showToast(data.message || "拓さんのLINEに質問を送信しました！");
+      showToast(data.message || "LINEに質問を送信しました！");
       await loadLineStatus();
     } catch (e) {
       showToast(e.message);
@@ -363,13 +384,16 @@ if (els.lineLearnBtn) {
     els.lineLearnBtn.querySelector(".btn-label").textContent = "AI人格を学習・更新中...";
 
     try {
-      const res = await fetch("/api/line/learn", { method: "POST" });
+      const res = await fetch("/api/line/learn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_id: currentPersonaId }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "学習に失敗しました");
 
       showToast(data.message || "LINEの会話からAI人格を学習・更新しました！");
       await loadLineStatus();
-      await loadPersona();
     } catch (e) {
       showToast(e.message);
     } finally {
@@ -412,7 +436,7 @@ if (els.lineImportBtn) {
       const res = await fetch("/api/line/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, auto_learn: true }),
+        body: JSON.stringify({ text, auto_learn: true, person_id: currentPersonaId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "インポートに失敗しました");
@@ -557,6 +581,7 @@ async function sendChat() {
       body: JSON.stringify({
         message,
         voice,
+        person_id: currentPersonaId,
         speed: speed === 1 ? null : speed,
         history: chatHistory,
         enable_tts: enableTts,
@@ -1062,14 +1087,137 @@ function roundRect(x, y, w, h, r) {
   ctx2d.fill();
 }
 
+/* ---------- マルチペルソナ（人物AI）管理 ---------- */
+
+async function loadPersonas() {
+  try {
+    const res = await fetch("/api/personas");
+    if (!res.ok) return;
+    const data = await res.json();
+    personasList = data.personas || [];
+
+    if (els.personaSelect) {
+      els.personaSelect.innerHTML = "";
+      for (const p of personasList) {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = `${p.name} (${p.nickname || p.name})`;
+        els.personaSelect.appendChild(opt);
+      }
+      els.personaSelect.value = currentPersonaId;
+      if (!els.personaSelect.value && personasList.length > 0) {
+        currentPersonaId = personasList[0].id;
+        els.personaSelect.value = currentPersonaId;
+      }
+    }
+
+    updateCurrentPersonaUI();
+  } catch (e) {
+    console.warn("ペルソナ一覧の取得失敗:", e);
+  }
+}
+
+function updateCurrentPersonaUI() {
+  const current = personasList.find((p) => p.id === currentPersonaId);
+  const name = current ? `${current.name} (${current.nickname || current.name})` : "市川 拓 (たく)";
+  if (els.lineCurrentPersonaName) {
+    els.lineCurrentPersonaName.textContent = name;
+  }
+  // そのペルソナに声が設定されていれば声を自動選択
+  if (current && current.voice_name && els.voice) {
+    const voiceOpts = Array.from(els.voice.options);
+    if (voiceOpts.some((o) => o.value === current.voice_name)) {
+      els.voice.value = current.voice_name;
+    }
+  }
+}
+
+if (els.personaSelect) {
+  els.personaSelect.addEventListener("change", (e) => {
+    currentPersonaId = e.target.value;
+    updateCurrentPersonaUI();
+    loadLineStatus();
+    showToast(`操作対象を「${els.personaSelect.options[els.personaSelect.selectedIndex].text}」に切り替えました`);
+  });
+}
+
+function populateNpVoiceSelect() {
+  if (!els.npVoiceSelect || !els.voice) return;
+  els.npVoiceSelect.innerHTML = '<option value="">（後で設定）</option>';
+  for (const opt of els.voice.options) {
+    if (!opt.value) continue;
+    const o = document.createElement("option");
+    o.value = opt.value;
+    o.textContent = opt.textContent;
+    els.npVoiceSelect.appendChild(o);
+  }
+}
+
+if (els.addPersonaBtn) {
+  els.addPersonaBtn.addEventListener("click", () => {
+    if (!els.newPersonaDialog) return;
+    if (els.npStatus) els.npStatus.textContent = "";
+    if (els.formNewPersona) els.formNewPersona.reset();
+    populateNpVoiceSelect();
+    els.newPersonaDialog.showModal();
+  });
+}
+
+if (els.closeNewPersonaBtn) {
+  els.closeNewPersonaBtn.addEventListener("click", () => {
+    if (els.newPersonaDialog) els.newPersonaDialog.close();
+  });
+}
+
+if (els.formNewPersona) {
+  els.formNewPersona.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!els.submitNewPersonaBtn) return;
+    els.submitNewPersonaBtn.disabled = true;
+    if (els.npStatus) els.npStatus.textContent = "AI人格を作成中...";
+
+    const payload = {
+      id: els.npId.value.trim(),
+      name: els.npName.value.trim(),
+      nickname: els.npNickname.value.trim(),
+      first_person: els.npFirstPerson.value.trim(),
+      attribute: els.npAttribute.value.trim(),
+      personality: els.npPersonality.value.trim(),
+      favorites: els.npFavorites.value.trim(),
+      voice_name: els.npVoiceSelect ? els.npVoiceSelect.value : "",
+    };
+
+    try {
+      const res = await fetch("/api/personas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "作成に失敗しました");
+
+      currentPersonaId = data.persona.id;
+      showToast(`「${data.persona.name}」の分身AIを作成しました！`);
+      await loadPersonas();
+      await loadLineStatus();
+      if (els.newPersonaDialog) els.newPersonaDialog.close();
+    } catch (err) {
+      if (els.npStatus) els.npStatus.textContent = `❌ ${err.message}`;
+      showToast(err.message);
+    } finally {
+      els.submitNewPersonaBtn.disabled = false;
+    }
+  });
+}
+
 /* ---------- 人格設定モーダル ---------- */
 
 async function openPersonaDialog() {
   els.personaStatus.textContent = "";
   try {
-    const res = await fetch("/api/persona");
+    const res = await fetch("/api/personas/" + encodeURIComponent(currentPersonaId));
     const data = await res.json();
-    els.personaTextarea.value = data.prompt;
+    els.personaTextarea.value = data.content || "";
   } catch (e) {
     els.personaTextarea.value = "読み込みに失敗しました";
   }
@@ -1077,14 +1225,14 @@ async function openPersonaDialog() {
 }
 
 async function savePersona() {
-  const prompt = els.personaTextarea.value.trim();
-  if (!prompt) return;
+  const content = els.personaTextarea.value.trim();
+  if (!content) return;
   els.savePersonaBtn.disabled = true;
   try {
-    const res = await fetch("/api/persona", {
+    const res = await fetch("/api/personas/" + encodeURIComponent(currentPersonaId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ content }),
     });
     if (res.ok) {
       els.personaStatus.textContent = "✓ 保存しました";
@@ -1099,9 +1247,9 @@ async function savePersona() {
   }
 }
 
-els.personaBtn.addEventListener("click", openPersonaDialog);
-els.closeDialogBtn.addEventListener("click", () => els.dialog.close());
-els.savePersonaBtn.addEventListener("click", savePersona);
+if (els.personaBtn) els.personaBtn.addEventListener("click", openPersonaDialog);
+if (els.closeDialogBtn) els.closeDialogBtn.addEventListener("click", () => els.dialog.close());
+if (els.savePersonaBtn) els.savePersonaBtn.addEventListener("click", savePersona);
 
 /* ---------- クローン音声の管理・追加モーダル ---------- */
 
@@ -1370,5 +1518,6 @@ resizeCanvas();
 requestAnimationFrame(draw);
 loadConfig();
 loadVoices();
+loadPersonas();
 loadLineStatus();
 els.chatInput.focus();

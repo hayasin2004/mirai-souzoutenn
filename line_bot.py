@@ -24,6 +24,13 @@ USERS_FILE = DATA_DIR / "line_users.json"
 TOPIC_HISTORY_FILE = DATA_DIR / "topic_history.json"
 PERSONA_FILE = BASE_DIR / "persona.txt"
 
+from persona_manager import (
+    get_persona,
+    get_persona_id_for_line_user,
+    list_personas,
+    save_persona_text as pm_save_persona_text,
+)
+
 load_dotenv(BASE_DIR / ".env")
 
 _logs_lock = threading.Lock()
@@ -180,14 +187,17 @@ def load_line_logs() -> List[Dict[str, Any]]:
         return []
 
 
-def save_line_log(user_id: str, user_text: str, ai_reply: str) -> Dict[str, Any]:
-    """1往復の会話ログを保存"""
+def save_line_log(user_id: str, user_text: str, ai_reply: str, person_id: Optional[str] = None) -> Dict[str, Any]:
+    """1往復の会話ログを保存（人物ペルソナIDと紐付け）"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not person_id:
+        person_id = get_persona_id_for_line_user(user_id)
     with _logs_lock:
         logs = load_line_logs()
         item = {
             "id": f"log_{int(time.time() * 1000)}",
             "user_id": user_id,
+            "person_id": person_id,
             "timestamp": datetime.now().isoformat(),
             "user_message": user_text,
             "ai_reply": ai_reply,
@@ -310,13 +320,21 @@ def generate_proactive_question(
     gemini_api_key: str,
     user_id: Optional[str] = None,
     category_id: Optional[str] = None,
+    person_id: Optional[str] = None,
 ) -> str:
     """
-    現在のpersona.txtと過去の会話ログを分析し、
+    対象ペルソナのpersona.txtと過去の会話ログを分析し、
     定期的に異なる話題カテゴリを選んで新鮮な質問文を生成する
     """
     from google import genai
     from google.genai import types
+
+    # 対象ペルソナを特定
+    target_p_id = person_id or (get_persona_id_for_line_user(user_id) if user_id else "taku")
+    p_data = get_persona(target_p_id) or get_persona("taku") or {}
+    p_name = p_data.get("name", "市川 拓")
+    p_nick = p_data.get("nickname", "たく")
+    current_persona = p_data.get("content", "")
 
     # 話題カテゴリを決定（ローテーションまたは指定）
     topic = pick_next_topic(category_id)
@@ -324,19 +342,16 @@ def generate_proactive_question(
     topic_hints = topic["hints"]
     topic_sample = topic.get("sample", "最近どんなことあった？")
 
-    # 現在のペルソナ情報
-    current_persona = ""
-    if PERSONA_FILE.exists():
-        with open(PERSONA_FILE, "r", encoding="utf-8") as f:
-            current_persona = f.read()
-
-    # 直近の会話ログ
+    # 直近の会話ログ（該当ペルソナまたは該当ユーザー）
     logs = load_line_logs()
     if user_id:
         logs = [l for l in logs if l.get("user_id") == user_id]
+    elif target_p_id:
+        logs = [l for l in logs if l.get("person_id", "taku") == target_p_id]
+
     recent_logs_text = ""
     for l in logs[-12:]:
-        recent_logs_text += f"拓さん: {l['user_message']}\nAI: {l['ai_reply']}\n"
+        recent_logs_text += f"{p_nick}さん: {l['user_message']}\nAI: {l['ai_reply']}\n"
 
     # 時間帯に応じた雰囲気づくり
     now_hour = datetime.now().hour
@@ -351,26 +366,26 @@ def generate_proactive_question(
         time_hint = "夜のリラックスタイム"
 
     prompt = (
-        "あなたはユーザー（市川 拓さん）の『分身AI』を作るための、専属の相棒AIです。\n\n"
-        "【すでに知っている拓さんの情報（persona.txt）】\n"
+        f"あなたはユーザー（{p_name}さん）の『分身AI』を作るための、専属の相棒AIです。\n\n"
+        f"【すでに知っている{p_nick}さんの情報】\n"
         f"{current_persona}\n\n"
-        "【最近のLINE会話履歴】\n"
+        f"【最近のLINE会話履歴】\n"
         f"{recent_logs_text if recent_logs_text else '（まだ会話履歴はありません）'}\n\n"
         f"【現在の時間帯】: {time_hint}（{now_hour}時頃）\n\n"
         f"【今回の質問テーマ（最重要）】\n"
         f"カテゴリ: 『{topic_name}』\n"
         f"着眼点・キーワード: {topic_hints}\n"
         f"質問のニュアンス例: {topic_sample}\n\n"
-        "【あなたのタスク】\n"
-        f"上記の『{topic_name}』のテーマに沿って、拓さんの本音や日常のエピソードを引き出す自然なLINE質問を1つ作成してください。\n"
-        "友達としてLINEでふと思いついたように気さくに話しかけてください。\n\n"
-        "【絶対ルール】\n"
-        "1. 親しい友達のような気さくなタメ口（敬語は絶対に使わない）。\n"
-        "2. 必ず1文〜2文（50文字以内）の超短文にすること。\n"
-        "3. 絵文字やマークダウン記号は使わず、自然な話し言葉にすること。\n"
-        "4. 直近の会話履歴ですでに話した話題（例: ラーメンやサウナ等で最近話したこと）とは被らないようにすること。\n"
-        "5. 時間帯に合った自然な切り出し（『そういえば〜』『ふと思ったんだけど〜』『おつかれ！〜』など）にすること。\n"
-        "6. 質問文そのものだけを出力してください。"
+        f"【あなたのタスク】\n"
+        f"上記の『{topic_name}』のテーマに沿って、{p_nick}さんの本音や日常のエピソードを引き出す自然なLINE質問を1つ作成してください。\n"
+        f"友達としてLINEでふと思いついたように気さくに話しかけてください。\n\n"
+        f"【絶対ルール】\n"
+        f"1. 親しい友達のような気さくなタメ口（敬語は絶対に使わない）。\n"
+        f"2. 必ず1文〜2文（50文字以内）の超短文にすること。\n"
+        f"3. 絵文字やマークダウン記号は使わず、自然な話し言葉にすること。\n"
+        f"4. 直近の会話履歴ですでに話した話題とは被らないようにすること。\n"
+        f"5. 時間帯に合った自然な切り出し（『そういえば〜』『ふと思ったんだけど〜』『おつかれ！〜』など）にすること。\n"
+        f"6. 質問文そのものだけを出力してください。"
     )
 
     client = genai.Client(api_key=gemini_api_key)
@@ -387,7 +402,7 @@ def generate_proactive_question(
             )
             if resp and resp.text:
                 clean_q = resp.text.strip().replace("「", "").replace("」", "").replace('"', "")
-                print(f"[PROACTIVE] カテゴリ【{topic_name}】から質問生成: \"{clean_q}\"", flush=True)
+                print(f"[PROACTIVE] {p_nick}さん宛て カテゴリ【{topic_name}】から質問生成: \"{clean_q}\"", flush=True)
                 return clean_q
         except Exception as e:
             print(f"[WARN] 自発質問生成リトライ ({model_name}): {e}")
@@ -400,8 +415,9 @@ def send_proactive_question_to_users(
     gemini_api_key: str,
     access_token: str,
     category_id: Optional[str] = None,
+    person_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """登録されているアクティブユーザー全員（または最新のユーザー）に自発的な質問を送信"""
+    """登録されているアクティブユーザーに自発的な質問を送信"""
     users = get_active_line_users()
     if not users:
         return {
@@ -410,38 +426,53 @@ def send_proactive_question_to_users(
             "sent_count": 0,
         }
 
-    question = generate_proactive_question(gemini_api_key, category_id=category_id)
+    target_p_id = person_id or "taku"
+    p_data = get_persona(target_p_id) or get_persona("taku") or {}
+    p_nick = p_data.get("nickname", "拓")
+
+    question = generate_proactive_question(gemini_api_key, category_id=category_id, person_id=target_p_id)
     sent_count = 0
 
     for uid in users:
+        # 指定ペルソナと紐づいているユーザー（未設定の場合は先頭または全ユーザー）
+        u_pid = get_persona_id_for_line_user(uid)
+        if person_id and u_pid != person_id and len(users) > 1:
+            continue
         ok = push_line_message(uid, question, access_token)
         if ok:
             sent_count += 1
             # AIからの能動メッセージとしてログに保存
-            save_line_log(uid, "（AIからの自発的な質問）", question)
+            save_line_log(uid, "（AIからの自発的な質問）", question, person_id=target_p_id)
 
     if sent_count > 0:
         return {
             "success": True,
-            "message": f"拓さんのLINEに質問を送信しました！\n質問内容：「{question}」",
+            "message": f"{p_nick}さんのLINEに質問を送信しました！\n質問内容：「{question}」",
             "question": question,
             "sent_count": sent_count,
+            "person_id": target_p_id,
         }
     else:
         return {
             "success": False,
-            "message": "LINEへのプッシュ送信に失敗しました。トークンを確認してください。",
+            "message": "LINEへのプッシュ送信に失敗しました。対象のLINEユーザーがいないかトークンが無効です。",
             "sent_count": 0,
         }
 
 
 def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: str) -> str:
     """
-    本人（市川拓さん）から自然にエピソードや口癖を引き出すインタビュー返信を生成。
-    同じ話題が続いた場合や一段落した場合は、スムーズに別の話題に切り替えて多角的な情報を引き出す。
+    本人から自然にエピソードや口癖を引き出すインタビュー返信を生成。
+    ユーザーごとにペルソナを自動判別し、同じ話題が続いた場合はスムーズに別の話題に切り替える。
     """
     from google import genai
     from google.genai import types
+
+    # ユーザーがどのペルソナか特定
+    p_id = get_persona_id_for_line_user(user_id)
+    p_data = get_persona(p_id) or get_persona("taku") or {}
+    p_name = p_data.get("name", "市川 拓")
+    p_nick = p_data.get("nickname", "たく")
 
     # 直近の会話文脈を取得（最大6往復）
     logs = load_line_logs()
@@ -462,7 +493,7 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
             f"【話題の切り替えルール（重要）】\n"
             f"現在の話題は十分深掘りできたか、相手の返事が一段落しました。\n"
             f"相手の発言を「なるほどね！」「そうなんだ（笑）」のように軽く受け止めて共感した上で、\n"
-            f"『あ、そういえばさ、全然話変わるんだけど〜』『ちなみに拓さんって〜』のように、\n"
+            f"『あ、そういえばさ、全然話変わるんだけど〜』『ちなみに{p_nick}さんって〜』のように、\n"
             f"自然に別の新しい話題（テーマ: 【{next_topic['name']}】、着眼点: {next_topic['hints']}）に話を切り替えて質問してください。\n"
             f"同じ話題の深掘りを続けず、テンポよく別の話題に移ってください。"
         )
@@ -474,15 +505,15 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
         )
 
     system_instruction = (
-        "あなたはユーザー（市川 拓さん）の『分身AI』を作るための、親しみやすい相棒・専属インタビュアーです。\n"
-        "【目的】\n"
-        "ユーザーとの自然な日常会話を通じて、本人の「口癖」「価値観」「日常のエピソード」「好きなことの具体的な話」を引き出すこと。\n\n"
-        "【対話ルール】\n"
-        "1. 気さくな友達のように、フランクなタメ口で話してください（敬語は絶対に使わない）。\n"
+        f"あなたはユーザー（{p_name}さん）の『分身AI』を作るための、親しみやすい相棒・専属インタビュアーです。\n"
+        f"【目的】\n"
+        f"ユーザーとの自然な日常会話を通じて、本人の「口癖」「価値観」「日常のエピソード」「好きなことの具体的な話」を引き出すこと。\n\n"
+        f"【対話ルール】\n"
+        f"1. 気さくな友達のように、フランクなタメ口で話してください（敬語は絶対に使わない）。\n"
         f"2. {topic_instruction}\n"
-        "3. テンポよく返せるよう、必ず1文〜2文（60文字以内）の短文で返信してください。\n"
-        "4. 説教やアドバイスは不要です。相手に気持ちよく喋らせる聞き役に徹してください。\n"
-        "5. 絵文字やマークダウン記号は使わず、自然な話し言葉にしてください。"
+        f"3. テンポよく返せるよう、必ず1文〜2文（60文字以内）の短文で返信してください。\n"
+        f"4. 説教やアドバイスは不要です。相手に気持ちよく喋らせる聞き役に徹してください。\n"
+        f"5. 絵文字やマークダウン記号は使わず、自然な話し言葉にしてください。"
     )
 
     contents = []
@@ -515,47 +546,50 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
     return "なるほどね！そういえば最近何かハマってることとかある？"
 
 
-def update_persona_from_logs(gemini_api_key: str) -> Dict[str, Any]:
+def update_persona_from_logs(gemini_api_key: str, person_id: str = "taku") -> Dict[str, Any]:
     """
-    未学習のLINE会話ログをGeminiで分析し、persona.txtを自動アップデートする
+    対象人物の未学習LINE会話ログをGeminiで分析し、該当ペルソナのpersona.txtを自動アップデートする
     """
     from google import genai
     from google.genai import types
 
+    p_data = get_persona(person_id) or get_persona("taku") or {}
+    p_name = p_data.get("name", "市川 拓")
+    p_nick = p_data.get("nickname", "たく")
+    current_persona = p_data.get("content", "")
+
     logs = load_line_logs()
-    unlearned_logs = [l for l in logs if not l.get("learned", False)]
+    # 該当person_idの未学習ログ、またはperson_idが明記されていない既存ログ(taku扱い)
+    unlearned_logs = [
+        l for l in logs
+        if not l.get("learned", False) and (l.get("person_id", "taku") == person_id)
+    ]
 
     if not unlearned_logs:
         return {
             "success": False,
-            "message": "新しく学習する未処理の会話ログがありません。",
+            "message": f"{p_name}さんの新しく学習する未処理の会話ログがありません。",
             "learned_count": 0,
         }
-
-    # 現在のpersona.txtを読み込み
-    current_persona = ""
-    if PERSONA_FILE.exists():
-        with open(PERSONA_FILE, "r", encoding="utf-8") as f:
-            current_persona = f.read()
 
     # 会話ログの整形
     conversations_text = ""
     log_ids = []
     for l in unlearned_logs[-30:]:  # 一度に最大30件まで学習
-        conversations_text += f"拓さん: {l['user_message']}\nAI: {l['ai_reply']}\n\n"
+        conversations_text += f"{p_nick}さん: {l['user_message']}\nAI: {l['ai_reply']}\n\n"
         log_ids.append(l["id"])
 
     instruction = (
-        "あなたは人物プロファイリングとAIプロンプト設計の最高責任者です。\n"
-        "以下は、対象人物（市川 拓さん）とAIが実際に行った最新のLINE対話ログです。\n\n"
-        "【現在の persona.txt】\n"
+        f"あなたは人物プロファイリングとAIプロンプト設計の最高責任者です。\n"
+        f"以下は、対象人物（{p_name}さん）とAIが実際に行った最新のLINE対話ログです。\n\n"
+        f"【現在の persona.txt】\n"
         f"{current_persona}\n\n"
-        "【新たに収集された本人のLINE会話ログ】\n"
+        f"【新たに収集された本人のLINE会話ログ】\n"
         f"{conversations_text}\n\n"
-        "【指示】\n"
-        "1. 新たな会話ログから、拓さん本人の「リアルな口癖」「新たに出たエピソードや好み」「リアクションの傾向」を抽出してください。\n"
-        "2. 現在の persona.txt の構造とルール（TTS用短文ルールなど）を壊さずに、新しいエピソードや会話例（Few-shot）を自然に追記・洗練してください。\n"
-        "3. 出力は、更新後の persona.txt の全文テキストのみを出力してください（余計な解説文やマークダウンコードブロック ``` は不要です）。"
+        f"【指示】\n"
+        f"1. 新たな会話ログから、{p_name}さん本人の「リアルな口癖」「新たに出たエピソードや好み」「リアクションの傾向」を抽出してください。\n"
+        f"2. 現在の persona.txt の構造とルール（TTS用短文ルールなど）を壊さずに、新しいエピソードや会話例（Few-shot）を自然に追記・洗練してください。\n"
+        f"3. 出力は、更新後の persona.txt の全文テキストのみを出力してください（余計な解説文やマークダウンコードブロック ``` は不要です）。"
     )
 
     client = genai.Client(api_key=gemini_api_key)
@@ -581,7 +615,7 @@ def update_persona_from_logs(gemini_api_key: str) -> Dict[str, Any]:
     if not updated_persona_text:
         return {
             "success": False,
-            "message": "Gemini による persona の更新テキスト生成に失敗しました。",
+            "message": f"Gemini による {p_name}さんの persona 更新テキスト生成に失敗しました。",
             "learned_count": 0,
         }
 
@@ -594,17 +628,17 @@ def update_persona_from_logs(gemini_api_key: str) -> Dict[str, Any]:
             lines = lines[:-1]
         updated_persona_text = "\n".join(lines).strip()
 
-    # persona.txt に書き込み保存
-    with open(PERSONA_FILE, "w", encoding="utf-8") as f:
-        f.write(updated_persona_text)
+    # persona を保存
+    pm_save_persona_text(person_id, updated_persona_text)
 
     # ログを学習済みに更新
     mark_logs_learned(log_ids)
 
     return {
         "success": True,
-        "message": f"新たに {len(log_ids)} 件のLINE会話ログを学習し、persona.txt を自動更新しました！",
+        "message": f"新たに {len(log_ids)} 件の会話ログを学習し、{p_name}さんの persona.txt を自動更新しました！",
         "learned_count": len(log_ids),
+        "person_id": person_id,
         "updated_persona": updated_persona_text,
     }
 
@@ -659,7 +693,7 @@ def start_proactive_scheduler(gemini_api_key: str, access_token: str, check_inte
     t.start()
 
 
-def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: bool = True) -> Dict[str, Any]:
+def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: bool = True, person_id: str = "taku") -> Dict[str, Any]:
     """
     LINE Official Account Managerのチャット欄コピペやトーク履歴テキストをGeminiで構造化抽出し、
     会話ログとして保存＆persona.txtに自動学習させる（DB管理不要）
@@ -671,12 +705,15 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
     if not raw_text:
         return {"success": False, "message": "テキストが空です。", "imported_count": 0}
 
+    p_data = get_persona(person_id) or get_persona("taku") or {}
+    p_name = p_data.get("name", "市川 拓")
+
     # 生ログのバックアップ保存
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     raw_backup_file = DATA_DIR / "line_imported_raw.txt"
     try:
         with open(raw_backup_file, "a", encoding="utf-8") as f:
-            f.write(f"\n--- インポート日時: {datetime.now().isoformat()} ---\n{raw_text}\n")
+            f.write(f"\n--- インポート日時: {datetime.now().isoformat()} (人物: {p_name}) ---\n{raw_text}\n")
     except Exception as e:
         print(f"[WARN] バックアップ書き込み失敗: {e}")
 
@@ -687,7 +724,7 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
         "【入力テキスト】\n"
         f"{raw_text[:15000]}\n\n"
         "【タスク】\n"
-        "このテキストから、市川拓さん（本人）の発言と、相手（AI、友達、ボットなど）の発言のやり取り（1往復ごと）を抽出してください。\n"
+        f"このテキストから、{p_name}さん（本人）の発言と、相手（AI、友達、ボットなど）の発言のやり取り（1往復ごと）を抽出してください。\n"
         "もし相手の発言がない場合や本人の一方的な発言・メモの場合は、ai_reply を「（LINEトーク履歴より記録）」としてください。\n\n"
         "【出力ルール】\n"
         "・必ず有効なJSON配列（リスト）のみを出力してください。\n"
@@ -755,6 +792,7 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
             log_item = {
                 "id": f"import_{int(time.time() * 1000)}_{idx}",
                 "user_id": "line_chat_import",
+                "person_id": person_id,
                 "timestamp": ts,
                 "user_message": u_msg,
                 "ai_reply": a_msg,
@@ -766,16 +804,17 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
         with open(LOGS_FILE, "w", encoding="utf-8") as f:
             json.dump(existing_logs, f, ensure_ascii=False, indent=2)
 
-    # 自動学習（persona.txt の更新）
+    # 自動学習（該当ペルソナの persona.txt の更新）
     learn_msg = ""
     if auto_learn and imported_count > 0:
-        learn_res = update_persona_from_logs(gemini_api_key)
+        learn_res = update_persona_from_logs(gemini_api_key, person_id=person_id)
         learn_msg = learn_res.get("message", "")
 
     return {
         "success": True,
-        "message": f"{imported_count} 件の会話ログをチャット履歴から取り込みました！" + (f"\n{learn_msg}" if learn_msg else ""),
+        "message": f"{p_name}さん宛て {imported_count} 件の会話ログを取り込みました！" + (f"\n{learn_msg}" if learn_msg else ""),
         "imported_count": imported_count,
         "learned": auto_learn,
+        "person_id": person_id,
     }
 

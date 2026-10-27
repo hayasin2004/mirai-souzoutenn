@@ -26,8 +26,17 @@
       </div>
     </div>
     <div class="header-actions">
+      <div class="persona-switch-group">
+        <span class="persona-switch-label" aria-hidden="true">👤</span>
+        <select id="persona-select" class="persona-select" title="操作・対話するAI人物を切り替え">
+          <option value="taku">市川 拓 (たく)</option>
+        </select>
+        <button id="add-persona-btn" class="btn-subtle btn-add-persona" type="button" title="新しい人物のAIを作成">
+          ＋ 新規AI
+        </button>
+      </div>
       <button id="persona-btn" class="btn-subtle" type="button">
-        ⚙ 人格プロンプト編集
+        ⚙ 人格設定
       </button>
       <span id="gemini-badge" class="badge badge-warn">Gemini: 確認中...</span>
       <span id="line-badge" class="badge">LINE: 確認中...</span>
@@ -119,6 +128,10 @@
       <!-- パネル3: LINE育成（会話ログ蓄積 & AI学習） -->
       <div id="panel-line" class="panel-content is-hidden">
         <div class="line-status-box">
+          <div class="line-persona-indicator">
+            <span class="indicator-icon">👤</span>
+            <span class="indicator-text">対象の人物AI: <strong id="line-current-persona-name">市川 拓 (たく)</strong></span>
+          </div>
           <div class="line-stats-row">
             <div class="line-stat-item">
               <span class="line-stat-label">連携状態</span>
@@ -338,6 +351,65 @@
           </div>
         </form>
       </div>
+    </div>
+  </dialog>
+
+  <!-- 新規人物AI作成モーダル -->
+  <dialog id="new-persona-dialog" class="dialog">
+    <div class="dialog-content voice-dialog-content">
+      <div class="dialog-header">
+        <h3>✨ 新しい人物のAIを作成</h3>
+        <button id="close-new-persona-btn" class="btn-close" type="button" aria-label="閉じる">×</button>
+      </div>
+      <p class="dialog-desc">
+        新しい人物のプロフィールや性格を入力してください。LINEでのインタビューや会話を通じて、自動でこの人物の人格が育成されます。
+      </p>
+
+      <form id="form-new-persona">
+        <div class="form-grid">
+          <label class="form-field">
+            <span class="field-label">お名前 (フルネーム) *</span>
+            <input type="text" id="np-name" placeholder="例: 佐藤 健一" required>
+          </label>
+          <label class="form-field">
+            <span class="field-label">呼ばれ方・ニックネーム</span>
+            <input type="text" id="np-nickname" placeholder="例: けんちゃん">
+          </label>
+          <label class="form-field">
+            <span class="field-label">人物ID (半角英数) *</span>
+            <input type="text" id="np-id" placeholder="例: sato_ken" required pattern="[a-zA-Z0-9_\-]+">
+          </label>
+          <label class="form-field">
+            <span class="field-label">一人称</span>
+            <input type="text" id="np-first-person" placeholder="例: 俺、僕、私" value="俺">
+          </label>
+          <label class="form-field form-full">
+            <span class="field-label">基本属性・プロフィール</span>
+            <input type="text" id="np-attribute" placeholder="例: 20代社会人、都内IT企業でデザインを担当。">
+          </label>
+          <label class="form-field form-full">
+            <span class="field-label">性格・特徴</span>
+            <input type="text" id="np-personality" placeholder="例: 好奇心旺盛、ポジティブ、ちょっと負けず嫌い。">
+          </label>
+          <label class="form-field form-full">
+            <span class="field-label">好きなこと・趣味</span>
+            <input type="text" id="np-favorites" placeholder="例: カフェ巡り、映画鑑賞、カメラ、筋トレ">
+          </label>
+          <label class="form-field form-full">
+            <span class="field-label">割り当てる声モデル (クローン音声)</span>
+            <select id="np-voice-select">
+              <option value="">（後で設定）</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="dialog-actions">
+          <span id="np-status" class="persona-status"></span>
+          <button id="submit-new-persona-btn" class="btn-primary" type="submit">
+            <span class="btn-label">✨ この人物の分身AIを作成する</span>
+          </button>
+        </div>
+      </form>
     </div>
   </dialog>
 

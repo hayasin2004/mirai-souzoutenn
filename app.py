@@ -31,6 +31,16 @@ from datetime import datetime
 from fishaudio.types import TTSConfig
 
 from voice_clone import BASE_DIR, DEFAULT_MODEL, load_voices, resolve_voice_id, save_voices
+from persona_manager import (
+    bind_line_user_to_persona,
+    create_persona,
+    delete_persona,
+    get_persona,
+    get_persona_id_for_line_user,
+    list_personas,
+    load_line_user_persona_map,
+    save_persona_text as pm_save_persona_text,
+)
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -61,7 +71,10 @@ def get_gemini_api_key() -> str | None:
     return key if key else None
 
 
-def load_persona_text() -> str:
+def load_persona_text(person_id: str = "taku") -> str:
+    p_data = get_persona(person_id)
+    if p_data and p_data.get("content"):
+        return p_data["content"]
     if PERSONA_FILE.exists():
         return PERSONA_FILE.read_text(encoding="utf-8")
     return (
@@ -70,8 +83,8 @@ def load_persona_text() -> str:
     )
 
 
-def save_persona_text(text: str) -> None:
-    PERSONA_FILE.write_text(text, encoding="utf-8")
+def save_persona_text(text: str, person_id: str = "taku") -> None:
+    pm_save_persona_text(person_id, text)
 
 
 def clean_tts_text(text: str) -> str:
@@ -339,7 +352,8 @@ def api_chat_stream():
             speed = None
 
     t_start = time.time()
-    system_prompt = custom_persona if custom_persona else load_persona_text()
+    person_id = str(data.get("person_id", "taku")).strip()
+    system_prompt = custom_persona if custom_persona else load_persona_text(person_id)
 
     def generate_sse():
         import json
@@ -533,9 +547,10 @@ def api_chat():
             speed = None
 
     t_start = time.time()
+    person_id = str(data.get("person_id", "taku")).strip()
 
     # 人格プロンプト
-    system_prompt = custom_persona if custom_persona else load_persona_text()
+    system_prompt = custom_persona if custom_persona else load_persona_text(person_id)
 
     # 1. Gemini で回答を生成
     t_gemini_start = time.time()
@@ -698,19 +713,126 @@ def api_line_topics():
     return jsonify(topics=get_topic_categories())
 
 
+# ---------- ペルソナ管理API ----------
+
+@app.get("/api/personas")
+def api_get_personas():
+    """登録されているペルソナ一覧を返す"""
+    return jsonify(personas=list_personas())
+
+
+@app.post("/api/personas")
+def api_create_persona():
+    """新しい人物のペルソナを作成"""
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    nickname = str(data.get("nickname", "")).strip() or name
+    person_id = str(data.get("id", "")).strip()
+    attribute = str(data.get("attribute", "")).strip()
+    personality = str(data.get("personality", "")).strip()
+    favorites = str(data.get("favorites", "")).strip()
+    dislikes = str(data.get("dislikes", "")).strip()
+    first_person = str(data.get("first_person", "私")).strip()
+    voice_name = str(data.get("voice_name", "")).strip()
+    initial_content = data.get("content")
+
+    if not name:
+        return error("お名前を入力してください。", 400)
+    if not person_id:
+        person_id = f"person_{int(time.time())}"
+
+    try:
+        new_p = create_persona(
+            person_id=person_id,
+            name=name,
+            nickname=nickname,
+            attribute=attribute,
+            personality=personality,
+            favorites=favorites,
+            dislikes=dislikes,
+            first_person=first_person,
+            voice_name=voice_name,
+            initial_content=initial_content,
+        )
+        return jsonify(success=True, persona=new_p)
+    except Exception as e:
+        return error(str(e), 400)
+
+
+@app.get("/api/personas/<person_id>")
+def api_get_persona_detail(person_id: str):
+    """指定されたペルソナの詳細・本文テキストを返す"""
+    p = get_persona(person_id)
+    if not p:
+        return error(f"ペルソナ '{person_id}' が見つかりません。", 404)
+    return jsonify(p)
+
+
+@app.post("/api/personas/<person_id>")
+def api_update_persona(person_id: str):
+    """指定されたペルソナのpersona.txtを更新"""
+    data = request.get_json(silent=True) or {}
+    content = data.get("content")
+    if content is None:
+        return error("content が空です。", 400)
+    save_persona_text(content, person_id=person_id)
+    return jsonify(success=True, message=f"{person_id} の人格設定を保存しました。")
+
+
+@app.delete("/api/personas/<person_id>")
+def api_delete_persona(person_id: str):
+    """指定されたペルソナを削除"""
+    try:
+        ok = delete_persona(person_id)
+        if not ok:
+            return error("ペルソナが見つかりません。", 404)
+        return jsonify(success=True, message=f"ペルソナ '{person_id}' を削除しました。")
+    except Exception as e:
+        return error(str(e), 400)
+
+
+@app.post("/api/personas/<person_id>/bind_line")
+def api_bind_line_user(person_id: str):
+    """LINEユーザーIDと指定ペルソナを紐付け"""
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id", "")).strip()
+    if not user_id:
+        return error("user_id が必要です。", 400)
+    bind_line_user_to_persona(user_id, person_id)
+    return jsonify(success=True, message=f"LINEユーザー {user_id} を {person_id} に紐付けました。")
+
+
+@app.get("/api/persona")
+def api_get_default_persona():
+    """互換性用: 現在のアクティブペルソナテキストを返す"""
+    person_id = request.args.get("person_id", "taku")
+    text = load_persona_text(person_id)
+    return jsonify(content=text, person_id=person_id)
+
+
+# ---------- LINE連携エンドポイント ----------
+
 @app.get("/api/line/status")
 def api_line_status():
     """LINE連携の状態と蓄積ログのサマリーを返す"""
     secret, token = get_line_credentials()
     logs = load_line_logs()
     users = get_active_line_users()
-    unlearned_count = sum(1 for l in logs if not l.get("learned", False))
+    person_id = request.args.get("person_id")
+
+    if person_id:
+        target_logs = [l for l in logs if l.get("person_id", "taku") == person_id]
+    else:
+        target_logs = logs
+
+    unlearned_count = sum(1 for l in target_logs if not l.get("learned", False))
     return jsonify(
         configured=bool(secret and token),
-        total_logs=len(logs),
+        total_logs=len(target_logs),
         unlearned_logs=unlearned_count,
         users_count=len(users),
-        recent_logs=logs[-10:],
+        recent_logs=target_logs[-10:],
+        user_persona_map=load_line_user_persona_map(),
     )
 
 
@@ -753,7 +875,10 @@ def api_line_webhook():
                 if not user_text or not reply_token:
                     continue
 
-                print(f"\n[LINE受信] 拓さん: \"{user_text}\"", flush=True)
+                target_pid = get_persona_id_for_line_user(user_id)
+                p_data = get_persona(target_pid) or {}
+                p_nick = p_data.get("nickname", "本人")
+                print(f"\n[LINE受信] {p_nick}さん: \"{user_text}\"", flush=True)
 
                 # Gemini でインタビュー返信を生成
                 ai_reply = generate_interview_reply(user_text, user_id, gemini_key)
@@ -763,7 +888,7 @@ def api_line_webhook():
                 reply_line_message(reply_token, ai_reply, token)
 
                 # 会話ログを保存
-                save_line_log(user_id, user_text, ai_reply)
+                save_line_log(user_id, user_text, ai_reply, person_id=target_pid)
 
     return "OK", 200
 
@@ -781,8 +906,11 @@ def api_line_proactive():
 
     data = request.get_json(silent=True) or {}
     category_id = data.get("category_id")
+    person_id = data.get("person_id")
 
-    result = send_proactive_question_to_users(gemini_key, token, category_id=category_id)
+    result = send_proactive_question_to_users(
+        gemini_key, token, category_id=category_id, person_id=person_id
+    )
     if not result.get("success"):
         return error(result.get("message", "自発質問の送信に失敗しました"), 400)
 
@@ -791,12 +919,15 @@ def api_line_proactive():
 
 @app.post("/api/line/learn")
 def api_line_learn():
-    """蓄積されたLINE会話ログから persona.txt を自動学習・更新"""
+    """蓄積されたLINE会話ログから該当人物の persona.txt を自動学習・更新"""
     gemini_key = get_gemini_api_key()
     if not gemini_key:
         return error("Gemini API キーが設定されていません", 400)
 
-    result = update_persona_from_logs(gemini_key)
+    data = request.get_json(silent=True) or {}
+    person_id = str(data.get("person_id", "taku")).strip()
+
+    result = update_persona_from_logs(gemini_key, person_id=person_id)
     if not result.get("success"):
         return error(result.get("message", "学習に失敗しました"), 400)
 
@@ -813,11 +944,12 @@ def api_line_import():
     data = request.get_json(silent=True) or {}
     text = str(data.get("text", "")).strip()
     auto_learn = bool(data.get("auto_learn", True))
+    person_id = str(data.get("person_id", "taku")).strip()
 
     if not text:
         return error("チャット履歴のテキストを入力してください。", 400)
 
-    result = import_line_chat_history(text, gemini_key, auto_learn=auto_learn)
+    result = import_line_chat_history(text, gemini_key, auto_learn=auto_learn, person_id=person_id)
     if not result.get("success"):
         return error(result.get("message", "チャット履歴の取り込みに失敗しました"), 400)
 
