@@ -35,11 +35,15 @@ from persona_manager import (
     bind_line_user_to_persona,
     create_persona,
     delete_persona,
+    find_persona_by_query,
+    format_persona_list_for_line,
+    get_default_line_persona_id,
     get_persona,
     get_persona_id_for_line_user,
     list_personas,
     load_line_user_persona_map,
     save_persona_text as pm_save_persona_text,
+    set_default_line_persona_id,
 )
 
 load_dotenv(BASE_DIR / ".env")
@@ -802,6 +806,29 @@ def api_bind_line_user(person_id: str):
     return jsonify(success=True, message=f"LINEユーザー {user_id} を {person_id} に紐付けました。")
 
 
+@app.post("/api/personas/<person_id>/set_line_default")
+def api_set_line_default_persona(person_id: str):
+    """LINEの全体デフォルトペルソナを設定し、現在接続中のユーザーも一括連動"""
+    ok = set_default_line_persona_id(person_id)
+    if not ok:
+        return error("ペルソナが見つかりません。", 404)
+
+    # 既に会話したことのあるLINEユーザーたちもこのペルソナに紐付け
+    active_users = get_active_line_users()
+    for uid in active_users:
+        bind_line_user_to_persona(uid, person_id)
+
+    p_data = get_persona(person_id) or {}
+    name = p_data.get("name", person_id)
+    nick = p_data.get("nickname", name)
+    return jsonify(
+        success=True,
+        message=f"LINEの会話・学習対象を「{name} ({nick})」に切り替えました！",
+        person_id=person_id,
+        person_name=name,
+    )
+
+
 @app.get("/api/persona")
 def api_get_default_persona():
     """互換性用: 現在のアクティブペルソナテキストを返す"""
@@ -820,10 +847,14 @@ def api_line_status():
     users = get_active_line_users()
     person_id = request.args.get("person_id")
 
+    default_pid = get_default_line_persona_id()
+    default_p = get_persona(default_pid) or {}
+    default_p_name = default_p.get("name", "市川 拓")
+
     if person_id:
         target_logs = [l for l in logs if l.get("person_id", "taku") == person_id]
     else:
-        target_logs = logs
+        target_logs = [l for l in logs if l.get("person_id", "taku") == default_pid]
 
     unlearned_count = sum(1 for l in target_logs if not l.get("learned", False))
     return jsonify(
@@ -831,14 +862,16 @@ def api_line_status():
         total_logs=len(target_logs),
         unlearned_logs=unlearned_count,
         users_count=len(users),
-        recent_logs=target_logs[-10:],
+        recent_logs=target_logs[-15:],
+        default_persona_id=default_pid,
+        default_persona_name=default_p_name,
         user_persona_map=load_line_user_persona_map(),
     )
 
 
 @app.post("/api/line/webhook")
 def api_line_webhook():
-    """LINE Messaging API からの Webhook を処理"""
+    """LINE Messaging API からの Webhook を処理（ペルソナ自動判定＆LINE内切り替え対応）"""
     secret, token = get_line_credentials()
     if not secret or not token:
         return "LINE credentials not configured", 500
@@ -862,7 +895,7 @@ def api_line_webhook():
         ev_type = event.get("type")
         user_id = event.get("source", {}).get("userId", "unknown_user")
 
-        # ユーザーIDを記憶（後で自発的に話しかけるため）
+        # ユーザーIDを記憶
         if user_id and user_id != "unknown_user":
             save_line_user(user_id)
 
@@ -876,9 +909,36 @@ def api_line_webhook():
                     continue
 
                 target_pid = get_persona_id_for_line_user(user_id)
+
+                # --- LINE内でのペルソナ切り替え / 一覧コマンド判定 ---
+                clean_cmd = user_text.strip()
+                if clean_cmd in ["一覧", "ペルソナ", "キャラ", "切り替え", "ヘルプ", "設定", "誰", "だれ"]:
+                    reply_msg = format_persona_list_for_line(target_pid)
+                    reply_line_message(reply_token, reply_msg, token)
+                    continue
+
+                if clean_cmd.startswith("切り替え") or clean_cmd.startswith("変更") or clean_cmd.startswith("ペルソナ"):
+                    parts = re.split(r"[\s:：]+", clean_cmd, maxsplit=1)
+                    if len(parts) > 1 and parts[1].strip():
+                        target_query = parts[1].strip()
+                        found = find_persona_by_query(target_query)
+                        if found:
+                            bind_line_user_to_persona(user_id, found["id"])
+                            set_default_line_persona_id(found["id"])
+                            name = found["name"]
+                            nick = found.get("nickname", name)
+                            reply_msg = f"【切り替え完了】\nこれからは「{name} ({nick})」のAIとして会話＆学習します！\nたくさんお話ししてね！"
+                            reply_line_message(reply_token, reply_msg, token)
+                            continue
+                        else:
+                            reply_msg = f"「{target_query}」に一致するペルソナが見つかりませんでした。「一覧」と送ると登録済みリストを確認できます。"
+                            reply_line_message(reply_token, reply_msg, token)
+                            continue
+
+                # 現在のペルソナ情報取得
                 p_data = get_persona(target_pid) or {}
-                p_nick = p_data.get("nickname", "本人")
-                print(f"\n[LINE受信] {p_nick}さん: \"{user_text}\"", flush=True)
+                p_nick = p_data.get("nickname", p_data.get("name", "本人"))
+                print(f"\n[LINE受信 (対象: {p_nick})] {user_text}", flush=True)
 
                 # Gemini でインタビュー返信を生成
                 ai_reply = generate_interview_reply(user_text, user_id, gemini_key)
@@ -887,7 +947,7 @@ def api_line_webhook():
                 # LINEに返信
                 reply_line_message(reply_token, ai_reply, token)
 
-                # 会話ログを保存
+                # 会話ログを対象ペルソナIDと紐付けて保存
                 save_line_log(user_id, user_text, ai_reply, person_id=target_pid)
 
     return "OK", 200

@@ -84,6 +84,9 @@ const els = {
   copyWebhookBtn: $("copy-webhook-btn"),
   lineLogsList: $("line-logs-list"),
   lineLogsBadge: $("line-logs-badge"),
+  lineCurrentPersonaName: $("line-current-persona-name"),
+  setLineActivePersonaBtn: $("set-line-active-persona-btn"),
+  lineActivePersonaBadge: $("line-active-persona-badge"),
 
   // LINEチャット履歴インポート
   lineImportText: $("line-import-text"),
@@ -273,6 +276,10 @@ async function loadLineStatus() {
     if (els.lineUsersCount) els.lineUsersCount.textContent = `${data.users_count || 0} 人`;
     if (els.lineLogsBadge) els.lineLogsBadge.textContent = `${data.total_logs} 件`;
 
+    if (els.lineActivePersonaBadge) {
+      els.lineActivePersonaBadge.textContent = data.default_persona_name || "市川 拓";
+    }
+
     // Webhook URL の表示（現在のホストから自動生成）
     if (els.webhookUrlCode) {
       const url = `${window.location.origin}/api/line/webhook`;
@@ -300,9 +307,13 @@ function renderLineLogs(logs) {
     const card = document.createElement("div");
     card.className = "line-log-card";
 
+    // どのペルソナの発言か動的に判定
+    const targetP = personasList.find((p) => p.id === (item.person_id || "taku"));
+    const senderName = targetP ? (targetP.nickname || targetP.name) : "本人";
+
     const userRow = document.createElement("div");
     userRow.className = "log-row-user";
-    userRow.innerHTML = `<span class="log-tag log-tag-user">拓さん</span> <span>${escapeHtml(item.user_message)}</span>`;
+    userRow.innerHTML = `<span class="log-tag log-tag-user">${escapeHtml(senderName)}</span> <span>${escapeHtml(item.user_message)}</span>`;
 
     const aiRow = document.createElement("div");
     aiRow.className = "log-row-ai";
@@ -315,7 +326,7 @@ function renderLineLogs(logs) {
     const statusClass = item.learned ? "learned" : "unlearned";
     const statusText = item.learned ? "学習済" : "未学習";
 
-    metaFoot.innerHTML = `<span>${timeStr}</span> <span class="status-pill ${statusClass}">${statusText}</span>`;
+    metaFoot.innerHTML = `<span>${timeStr} (${escapeHtml(targetP ? targetP.name : "市川 拓")})</span> <span class="status-pill ${statusClass}">${statusText}</span>`;
 
     card.append(userRow, aiRow, metaFoot);
     els.lineLogsList.append(card);
@@ -329,6 +340,22 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+if (els.setLineActivePersonaBtn) {
+  els.setLineActivePersonaBtn.addEventListener("click", async () => {
+    try {
+      const res = await fetch(`/api/personas/${encodeURIComponent(currentPersonaId)}/set_line_default`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "設定に失敗しました");
+      showToast(data.message || "LINEの対話・学習相手を変更しました！");
+      await loadLineStatus();
+    } catch (e) {
+      showToast(e.message);
+    }
+  });
 }
 
 if (els.lineRefreshBtn) {
@@ -1162,11 +1189,19 @@ function updateCurrentPersonaUI() {
 }
 
 if (els.personaSelect) {
-  els.personaSelect.addEventListener("change", (e) => {
+  els.personaSelect.addEventListener("change", async (e) => {
     currentPersonaId = e.target.value;
     updateCurrentPersonaUI();
+
+    // LINEの会話・学習対象も連動切り替え
+    try {
+      await fetch(`/api/personas/${encodeURIComponent(currentPersonaId)}/set_line_default`, {
+        method: "POST",
+      });
+    } catch (_) {}
+
     loadLineStatus();
-    showToast(`操作対象を「${els.personaSelect.options[els.personaSelect.selectedIndex].text}」に切り替えました`);
+    showToast(`操作対象・LINE学習対象を「${els.personaSelect.options[els.personaSelect.selectedIndex].text}」に切り替えました`);
   });
 }
 

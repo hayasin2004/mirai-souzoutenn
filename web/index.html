@@ -130,7 +130,14 @@
         <div class="line-status-box">
           <div class="line-persona-indicator">
             <span class="indicator-icon">👤</span>
-            <span class="indicator-text">対象の人物AI: <strong id="line-current-persona-name">市川 拓 (たく)</strong></span>
+            <span class="indicator-text">Web操作対象: <strong id="line-current-persona-name">市川 拓 (たく)</strong></span>
+            <button id="set-line-active-persona-btn" class="btn-subtle btn-set-line-persona" type="button" title="現在選択中のペルソナをLINEボットの会話・学習対象に設定します">
+              📱 この人物をLINEの会話・学習対象にする
+            </button>
+          </div>
+          <div class="line-active-badge-row">
+            <span class="line-active-label">LINEボットの現在の対話・学習相手:</span>
+            <strong id="line-active-persona-badge" class="badge badge-success">市川 拓</strong>
           </div>
           <div class="line-stats-row">
             <div class="line-stat-item">
@@ -195,6 +202,14 @@
             <code id="webhook-url-code">https://&lt;外部URL&gt;/api/line/webhook</code>
             <button id="copy-webhook-btn" class="btn-copy" type="button">コピー</button>
           </div>
+        </div>
+
+        <div class="line-webhook-info" style="margin-top: 10px;">
+          <div class="info-title">💬 LINEから直接ペルソナを切り替える方法</div>
+          <p class="info-desc">
+            LINEのトークで<strong>「一覧」</strong>と送ると登録されているAIの一覧が表示されます。<br>
+            <strong>「切り替え 2」</strong>や<strong>「切り替え 佐藤」</strong>のように送ると、その人物のAIに即座に切り替えて会話・学習できます！
+          </p>
         </div>
 
         <!-- チャット履歴の一括取り込み（DB不要・管理画面コピペ対応） -->

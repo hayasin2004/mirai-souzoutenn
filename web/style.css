@@ -1329,3 +1329,47 @@ kbd {
   line-height: 1.4;
 }
 
+/* LINEペルソナ連動・切り替えUI */
+.line-persona-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: hsl(232 30% 12% / 0.9);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.line-persona-indicator .indicator-text {
+  font-size: 0.88rem;
+  color: var(--text);
+}
+.btn-set-line-persona {
+  margin-left: auto;
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  background: hsl(145 70% 30% / 0.2);
+  border: 1px solid #06c755;
+  color: #06c755;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-set-line-persona:hover {
+  background: #06c755;
+  color: #fff;
+  transform: translateY(-1px);
+}
+.line-active-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+.line-active-label {
+  color: var(--text-faint);
+}
+

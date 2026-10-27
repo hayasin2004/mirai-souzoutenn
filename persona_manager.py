@@ -237,13 +237,41 @@ def delete_persona(person_id: str) -> bool:
 
 
 # LINEユーザーIDとペルソナの紐付け管理
+DEFAULT_LINE_PERSONA_FILE = DATA_DIR / "default_line_persona.txt"
+
+
+def get_default_line_persona_id() -> str:
+    """LINEの全体デフォルトペルソナIDを取得（未設定ならtaku）"""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if DEFAULT_LINE_PERSONA_FILE.exists():
+        try:
+            pid = DEFAULT_LINE_PERSONA_FILE.read_text(encoding="utf-8", errors="replace").strip()
+            if pid and (PERSONAS_DIR / pid).exists():
+                return pid
+        except Exception:
+            pass
+    return "taku"
+
+
+def set_default_line_persona_id(person_id: str) -> bool:
+    """LINEの全体デフォルトペルソナIDを設定"""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not (PERSONAS_DIR / person_id).exists() and person_id != "taku":
+        return False
+    try:
+        DEFAULT_LINE_PERSONA_FILE.write_text(person_id, encoding="utf-8", errors="replace")
+        return True
+    except Exception:
+        return False
+
+
 def load_line_user_persona_map() -> Dict[str, str]:
     """LINEユーザーID -> ペルソナIDのマップを読み込む"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not USER_PERSONA_MAP_FILE.exists():
         return {}
     try:
-        with open(USER_PERSONA_MAP_FILE, "r", encoding="utf-8") as f:
+        with open(USER_PERSONA_MAP_FILE, "r", encoding="utf-8", errors="replace") as f:
             return json.load(f)
     except Exception:
         return {}
@@ -254,13 +282,74 @@ def bind_line_user_to_persona(user_id: str, person_id: str) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     mapping = load_line_user_persona_map()
     mapping[user_id] = person_id
-    with open(USER_PERSONA_MAP_FILE, "w", encoding="utf-8") as f:
+    with open(USER_PERSONA_MAP_FILE, "w", encoding="utf-8", errors="replace") as f:
         json.dump(mapping, f, ensure_ascii=False, indent=2)
 
 
 def get_persona_id_for_line_user(user_id: Optional[str]) -> str:
-    """LINEユーザーIDに対応するペルソナIDを取得（未登録ならデフォルトtaku）"""
+    """
+    LINEユーザーIDに対応するペルソナIDを取得。
+    個別マッピングがあればそれを返し、なければ全体デフォルトペルソナを返す
+    """
     if not user_id:
-        return "taku"
+        return get_default_line_persona_id()
     mapping = load_line_user_persona_map()
-    return mapping.get(user_id, "taku")
+    return mapping.get(user_id, get_default_line_persona_id())
+
+
+def find_persona_by_query(query: str) -> Optional[Dict[str, Any]]:
+    """
+    番号（1, 2...）や名前、ニックネーム、IDからペルソナを柔軟に検索
+    """
+    personas = list_personas()
+    q = query.strip()
+    if not q:
+        return None
+
+    # 1. 番号指定（例: "1", "2"）
+    if q.isdigit():
+        idx = int(q) - 1
+        if 0 <= idx < len(personas):
+            return get_persona(personas[idx]["id"])
+
+    q_lower = q.lower()
+    # 2. 完全一致または部分一致検索
+    for p in personas:
+        pid = p["id"].lower()
+        pname = p.get("name", "").lower()
+        pnick = p.get("nickname", "").lower()
+        if q_lower == pid or q_lower == pname or q_lower == pnick:
+            return get_persona(p["id"])
+
+    # 3. 部分一致
+    for p in personas:
+        pname = p.get("name", "").lower()
+        pnick = p.get("nickname", "").lower()
+        if q_lower in pname or q_lower in pnick:
+            return get_persona(p["id"])
+
+    return None
+
+
+def format_persona_list_for_line(current_pid: str) -> str:
+    """
+    LINE送信用のペルソナ一覧案内テキストを生成
+    """
+    personas = list_personas()
+    current_p = get_persona(current_pid) or {}
+    cur_name = current_p.get("name", "市川 拓")
+    cur_nick = current_p.get("nickname", "たく")
+
+    lines = [
+        "【AIペルソナ一覧】",
+        f"現在の会話・学習相手: {cur_name} ({cur_nick})",
+        "",
+    ]
+    for idx, p in enumerate(personas, start=1):
+        mark = "★会話中" if p["id"] == current_pid else ""
+        lines.append(f"{idx}: {p['name']} ({p.get('nickname', p['name'])}) {mark}")
+
+    lines.append("")
+    lines.append("「切り替え <番号または名前>」と送ると、その人のAIに即座に切り替えて会話・学習できます！")
+    lines.append("（例: 「切り替え 2」 または 「切り替え 佐藤」）")
+    return "\n".join(lines)
