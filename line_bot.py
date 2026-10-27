@@ -28,7 +28,7 @@ load_dotenv(BASE_DIR / ".env")
 
 _logs_lock = threading.Lock()
 
-# 分身AIの人格を豊かにするための多彩なインタビュー話題カテゴリ
+# 分身AIの人格を豊かにするための多彩なインタビュー話題カテゴリ（全15ジャンル）
 INTERVIEW_TOPIC_CATEGORIES: List[Dict[str, str]] = [
     {
         "id": "school_tech",
@@ -56,9 +56,15 @@ INTERVIEW_TOPIC_CATEGORIES: List[Dict[str, str]] = [
     },
     {
         "id": "entertainment_culture",
-        "name": "エンタメ・音楽・動画・ゲーム",
-        "hints": "好きな音楽やよく聴くアーティスト、YouTubeで見るチャンネル、最近ハマったアニメ・映画、にゃんこ大戦争以外のゲーム",
+        "name": "エンタメ・音楽・動画・アニメ",
+        "hints": "好きな音楽やよく聴くアーティスト、YouTubeで見るチャンネル、最近ハマったアニメ・映画、漫画",
         "sample": "YouTubeで気づいたら見ちゃう動画のジャンルとかある？",
+    },
+    {
+        "id": "game_digital",
+        "name": "ゲーム・スマホ・デジタルライフ",
+        "hints": "にゃんこ大戦争以外のゲーム歴、PCのこだわり、スマホで一番開いてるアプリ、SNSの見方",
+        "sample": "昔一番やり込んだゲームとかって何だった？",
     },
     {
         "id": "values_emotion",
@@ -71,6 +77,36 @@ INTERVIEW_TOPIC_CATEGORIES: List[Dict[str, str]] = [
         "name": "買い物・持ち物・ファッション",
         "hints": "最近買って一番良かったもの、服を選ぶ時のこだわり、つい無駄遣いしちゃうもの、ずっと欲しいと思っている物",
         "sample": "今年買ったものの中で『これ買って大正解だった！』ってやつある？",
+    },
+    {
+        "id": "holiday_travel",
+        "name": "休日のお出かけ・ドライブ・旅行",
+        "hints": "休日にふらっと出かける場所、今まで行った旅行で一番良かったところ、行ってみたいスポット",
+        "sample": "休みの日にふらっと出かけるならどこ行くことが多い？",
+    },
+    {
+        "id": "body_health_sleep",
+        "name": "睡眠・運動・リフレッシュ",
+        "hints": "何時間寝ると一番調子いいか、寝相や寝起きの良さ、サウナ以外の運動、疲れを取るための工夫",
+        "sample": "拓さんって普段何時間くらい寝るのが一番ベスト？",
+    },
+    {
+        "id": "convenience_snack",
+        "name": "コンビニ・お菓子・夜食の定番",
+        "hints": "コンビニに行くとつい買っちゃうスイーツやアイス、夜中にお腹空いた時に食べるもの、好きな飲み物",
+        "sample": "コンビニ行ったら絶対カゴに入れちゃうやつとかある？",
+    },
+    {
+        "id": "stress_relief",
+        "name": "やる気の出し方・息抜き・気分転換",
+        "hints": "課題や勉強でやる気出ない時の対処法、一番リラックスできる時間、イライラした時の発散法",
+        "sample": "やる気出ない時ってどうやって切り替えてる？",
+    },
+    {
+        "id": "fashion_room",
+        "name": "自分の部屋・持ち物のこだわり",
+        "hints": "部屋で一番お気に入りの場所、机の上の散らかり具合、よく着る服の系統や色",
+        "sample": "自分の部屋の中で一番落ち着く場所ってどこ？",
     },
     {
         "id": "memories_past",
@@ -120,8 +156,8 @@ def pick_next_topic(category_id: Optional[str] = None) -> Dict[str, str]:
         else:
             selected = random.choice(INTERVIEW_TOPIC_CATEGORIES)
     else:
-        # 直近3回で使われていない候補を抽出
-        excluded_ids = set(recent_ids[-3:]) if len(recent_ids) >= 3 else set(recent_ids)
+        # 直近6回で使われていない候補を抽出（ループを防止）
+        excluded_ids = set(recent_ids[-6:]) if len(recent_ids) >= 6 else set(recent_ids)
         candidates = [c for c in INTERVIEW_TOPIC_CATEGORIES if c["id"] not in excluded_ids]
         if not candidates:
             candidates = INTERVIEW_TOPIC_CATEGORIES
@@ -130,10 +166,10 @@ def pick_next_topic(category_id: Optional[str] = None) -> Dict[str, str]:
         candidates_sorted = sorted(candidates, key=lambda c: (counts.get(c["id"], 0), random.random()))
         selected = candidates_sorted[0]
 
-    # 履歴を更新
+    # 履歴を更新（直近15件を保持）
     recent_ids.append(selected["id"])
-    if len(recent_ids) > 10:
-        recent_ids = recent_ids[-10:]
+    if len(recent_ids) > 15:
+        recent_ids = recent_ids[-15:]
     history["recent_topic_ids"] = recent_ids
     history["topic_counts"][selected["id"]] = counts.get(selected["id"], 0) + 1
 
@@ -438,51 +474,51 @@ def send_proactive_question_to_users(
 def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: str) -> str:
     """
     本人（市川拓さん）から自然にエピソードや口癖を引き出すインタビュー返信を生成。
-    同じ話題が続いた場合や一段落した場合は、スムーズに別の話題に切り替えて多角的な情報を引き出す。
+    尋問のように無理に話題を切り替えるのではなく、自然な友達同士の雑談・リアクション・共感を優先し、
+    話題が本当に尽きた場合のみ新しい角度から話を広げる。
     """
     from google import genai
     from google.genai import types
 
-    # 直近の会話文脈を取得（最大6往復）
+    # 直近の会話文脈を取得（最大8往復）
     logs = load_line_logs()
-    user_recent_logs = [l for l in logs if l.get("user_id") == user_id][-6:]
+    user_recent_logs = [l for l in logs if l.get("user_id") == user_id][-8:]
 
-    # 次の候補となるトピックを事前に取得（話題転換用）
-    next_topic = pick_next_topic()
-
-    # ラリーの長さや返答の短さから話題転換（トピックシフト）すべきかを判定
-    recent_len = len(user_recent_logs)
-    is_short = len(user_message.strip()) <= 6 or any(
-        w in user_message for w in ["うん", "そう", "ない", "普通", "とくに", "特に", "まあね", "微妙", "わからない", "知らん"]
+    # 相手が明示的に話題を変えたがっているか、または同じ話題で長くラリーが続いたか
+    wants_new_topic = any(
+        kw in user_message for kw in ["別の話", "違う話", "他には", "話題変え", "飽きた", "それより", "関係ないけど"]
     )
-    should_switch = (recent_len >= 3) or is_short
+    is_conversation_long = len(user_recent_logs) >= 6
 
-    if should_switch:
-        topic_instruction = (
-            f"【話題の切り替えルール（重要）】\n"
-            f"現在の話題は十分深掘りできたか、相手の返事が一段落しました。\n"
-            f"相手の発言を「なるほどね！」「そうなんだ（笑）」のように軽く受け止めて共感した上で、\n"
-            f"『あ、そういえばさ、全然話変わるんだけど〜』『ちなみに拓さんって〜』のように、\n"
-            f"自然に別の新しい話題（テーマ: 【{next_topic['name']}】、着眼点: {next_topic['hints']}）に話を切り替えて質問してください。\n"
-            f"同じ話題の深掘りを続けず、テンポよく別の話題に移ってください。"
+    # 自然な対話プロンプトの構成
+    if wants_new_topic or is_conversation_long:
+        next_hint = pick_next_topic()
+        transition_guide = (
+            f"【話題の展開】\n"
+            f"相手の返答を軽く受け止めた上で、自然に新しい日常の話題へ話を移してください。\n"
+            f"ヒントテーマ: 『{next_hint['name']}』（着眼点: {next_hint['hints']}）などを参考に、\n"
+            f"「そういえばさ〜」「話変わるんだけど〜」と気さくに友達らしく切り出してください。"
         )
     else:
-        topic_instruction = (
-            "【話題の深掘りルール】\n"
-            "相手の発言を肯定・共感しつつ、「それって普段もよく行くの？」「どんなところが好き？」「他には？」など、"
-            "自然にその話をもう一歩広げる一言質問を添えてください。"
+        transition_guide = (
+            "【会話の広げ方（最重要）】\n"
+            "相手の発言に含まれる具体的な単語やエピソード（食べ物、店、場所、出来事、感想など）を拾って、"
+            "まずは「共感・リアクション（『それな！』『わかるわー笑』『まじで？』など）」を返してください。\n"
+            "その上で、相手がさらに喋りたくなるような自然な一言（『それのどこが好き？』『何倍にする派？』『いつ行ったの？』など）を軽く添えてください。\n"
+            "※急に全然関係のない別の話題に飛ぶのは不自然なので絶対に避けてください。今の話題を楽しく広げてください。"
         )
 
     system_instruction = (
-        "あなたはユーザー（市川 拓さん）の『分身AI』を作るための、親しみやすい相棒・専属インタビュアーです。\n"
+        "あなたはユーザー（市川 拓さん）の『分身AI』を作るための、専属の相棒・親しい友達です。\n\n"
         "【目的】\n"
-        "ユーザーとの自然な日常会話を通じて、本人の「口癖」「価値観」「日常のエピソード」「好きなことの具体的な話」を引き出すこと。\n\n"
+        "友達同士のテンポ良い日常のLINE雑談を通じて、拓さんのリアルな「口癖」「リアクション」「こだわり」「エピソード」を引き出すこと。\n\n"
         "【対話ルール】\n"
-        "1. 気さくな友達のように、フランクなタメ口で話してください（敬語は絶対に使わない）。\n"
-        f"2. {topic_instruction}\n"
-        "3. テンポよく返せるよう、必ず1文〜2文（60文字以内）の短文で返信してください。\n"
-        "4. 説教やアドバイスは不要です。相手に気持ちよく喋らせる聞き役に徹してください。\n"
-        "5. 絵文字やマークダウン記号は使わず、自然な話し言葉にしてください。"
+        "1. 友達同士の気さくなタメ口（敬語は絶対に使わない）。\n"
+        "2. 一方的なアンケートや尋問にならないように、まず相手の発言にしっかり共感・リアクションすること。\n"
+        f"3. {transition_guide}\n"
+        "4. テンポよく返せるよう、必ず1文〜2文（60文字以内）の短文にすること。\n"
+        "5. 絵文字やマークダウン記号は使わず、自然な話し言葉（笑、〜じゃん、〜だわ、など）にすること。\n"
+        "6. 説教、アドバイス、長い解説は一切不要です。"
     )
 
     contents = []
@@ -502,7 +538,7 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
-                    temperature=0.82,
+                    temperature=0.85,
                     max_output_tokens=120,
                 ),
             )
@@ -512,7 +548,7 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
             print(f"[WARN] LINE返答生成リトライ ({model_name}): {e}")
             continue
 
-    return "なるほどね！そういえば最近何かハマってることとかある？"
+    return "なるほどね！それって普段もよく行くの？"
 
 
 def update_persona_from_logs(gemini_api_key: str) -> Dict[str, Any]:
