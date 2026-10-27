@@ -46,10 +46,25 @@ SUPPORTED_EXT = {".wav", ".mp3", ".m4a", ".opus"}
 
 # ---------- voices.json（名前 → voice_id の対応表） ----------
 
+DEFAULT_VOICES = {
+    "tako": {
+        "id": "216ae90651fd45f58de1262710b67474",
+        "source": "test.mp3",
+        "created_at": "2026-10-20T14:59:26",
+    }
+}
+
+
 def load_voices() -> dict:
+    voices = dict(DEFAULT_VOICES)
     if VOICES_FILE.exists():
-        return json.loads(VOICES_FILE.read_text(encoding="utf-8"))
-    return {}
+        try:
+            saved = json.loads(VOICES_FILE.read_text(encoding="utf-8"))
+            if isinstance(saved, dict):
+                voices.update(saved)
+        except Exception as e:
+            print(f"[WARN] voices.json 読み込み失敗: {e}")
+    return voices
 
 
 def save_voices(voices: dict) -> None:
