@@ -407,15 +407,44 @@ if (els.lineLearnBtn) {
 /* ---------- LINEチャット履歴の一括インポート・学習 ---------- */
 
 if (els.lineImportFile) {
-  els.lineImportFile.addEventListener("change", (e) => {
+  els.lineImportFile.addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     if (els.lineImportFilename) els.lineImportFilename.textContent = file.name;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      els.lineImportText.value = evt.target.result;
-    };
-    reader.readAsText(file, "utf-8");
+
+    try {
+      const buffer = await file.arrayBuffer();
+      // まず UTF-8 でデコード
+      let text = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
+
+      // 文字化け（置換文字 \ufffd）が多い場合、Windows/LINEエクスポート特有の Shift-JIS (CP932) を試行
+      const ufffdCount = (text.match(/\ufffd/g) || []).length;
+      if (ufffdCount > 5) {
+        try {
+          const sjisText = new TextDecoder("shift-jis").decode(buffer);
+          const sjisUfffd = (sjisText.match(/\ufffd/g) || []).length;
+          if (sjisUfffd < ufffdCount) {
+            text = sjisText;
+          }
+        } catch (_) {}
+      }
+
+      // 不可視制御文字・BOM・NULL文字等をサニタイズ
+      text = text
+        .replace(/\ufeff/g, "")
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "");
+
+      if (els.lineImportText) {
+        els.lineImportText.value = text;
+      }
+    } catch (err) {
+      console.warn("ファイル読み込みフォールバック:", err);
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        if (els.lineImportText) els.lineImportText.value = evt.target.result;
+      };
+      reader.readAsText(file, "utf-8");
+    }
   });
 }
 

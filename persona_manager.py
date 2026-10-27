@@ -149,16 +149,16 @@ def get_persona(person_id: str = "taku") -> Optional[Dict[str, Any]]:
 
 
 def save_persona_text(person_id: str, text: str) -> bool:
-    """指定されたペルソナのpersona.txtを保存"""
+    """指定されたペルソナのpersona.txtを保存（表示不能文字のエンコード例外を防止）"""
     ensure_personas_dir()
     target_dir = PERSONAS_DIR / person_id
     target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / "persona.txt").write_text(text, encoding="utf-8")
+    (target_dir / "persona.txt").write_text(text, encoding="utf-8", errors="replace")
 
     # もしtakuならレガシーpersona.txtとも同期
     if person_id == "taku":
         try:
-            LEGACY_PERSONA_FILE.write_text(text, encoding="utf-8")
+            LEGACY_PERSONA_FILE.write_text(text, encoding="utf-8", errors="replace")
         except Exception:
             pass
     return True

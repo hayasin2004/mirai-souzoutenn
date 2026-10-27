@@ -949,7 +949,11 @@ def api_line_import():
     if not text:
         return error("チャット履歴のテキストを入力してください。", 400)
 
-    result = import_line_chat_history(text, gemini_key, auto_learn=auto_learn, person_id=person_id)
+    try:
+        result = import_line_chat_history(text, gemini_key, auto_learn=auto_learn, person_id=person_id)
+    except Exception as e:
+        print(f"[ERROR] LINE履歴インポート例外: {e}")
+        return error(f"インポート処理中にエラーが発生しました: {e}", 500)
     if not result.get("success"):
         return error(result.get("message", "チャット履歴の取り込みに失敗しました"), 400)
 
