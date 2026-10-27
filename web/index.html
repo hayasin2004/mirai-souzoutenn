@@ -56,7 +56,10 @@
       <!-- 共通コントロール: 声と速さ -->
       <div class="controls-row">
         <label class="field">
-          <span class="field-label">声 (クローン)</span>
+          <div class="field-head-row">
+            <span class="field-label">声 (クローン)</span>
+            <button id="manage-voices-btn" class="btn-text-sm" type="button">⚙️ 声の管理・追加</button>
+          </div>
           <div class="select-wrap">
             <select id="voice-select" aria-label="声を選択">
               <option value="">読み込み中...</option>
@@ -161,6 +164,29 @@
           </div>
         </div>
 
+        <!-- チャット履歴の一括取り込み（DB不要・管理画面コピペ対応） -->
+        <div class="line-import-section">
+          <div class="info-title">📥 LINEチャット履歴の一括取り込み・学習（DB不要）</div>
+          <p class="info-desc">
+            LINE Official Account Manager（公式アカウント管理画面）のチャット欄をコピー＆ペーストするか、トーク履歴テキストファイルを読み込ませるだけで、Geminiが会話ログの復元と人格学習を一瞬で行います。
+          </p>
+          <div class="line-import-box">
+            <textarea id="line-import-text" class="line-import-textarea" rows="4" placeholder="ここにLINE公式アカウントのチャット画面を全選択してコピー＆ペーストしてください（例:&#10;市川拓 18:30 今日ラーメン食べた&#10;分身AI 18:31 いいね！どこのラーメン？&#10;...などそのまま貼り付けてOKです）"></textarea>
+            <div class="line-import-bar">
+              <label class="btn-subtle file-select-label">
+                📁 .txt ファイルを選択
+                <input type="file" id="line-import-file" accept=".txt,text/plain" style="display: none;">
+              </label>
+              <span id="line-import-filename" class="file-chosen-name"></span>
+              <button id="line-import-btn" class="btn-primary btn-import" type="button">
+                <span class="btn-spinner" aria-hidden="true"></span>
+                <span class="btn-label">📥 チャットを読み込んで学習</span>
+              </button>
+            </div>
+            <div id="line-import-status" class="line-import-status"></div>
+          </div>
+        </div>
+
         <div class="line-logs-section">
           <div class="logs-header">
             <h3>📱 蓄積されたLINE対話ログ</h3>
@@ -222,6 +248,81 @@
       <div class="dialog-actions">
         <span id="persona-status" class="persona-status"></span>
         <button id="save-persona-btn" class="btn-primary" type="button">保存する</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- クローン音声の管理・追加モーダル -->
+  <dialog id="voice-dialog" class="dialog">
+    <div class="dialog-content voice-dialog-content">
+      <div class="dialog-header">
+        <h3>🎙️ クローン音声の管理・新規追加</h3>
+        <button id="close-voice-dialog-btn" class="btn-close" type="button" aria-label="閉じる">×</button>
+      </div>
+
+      <!-- 登録済みの声一覧 -->
+      <div class="voice-section">
+        <h4 class="section-title">登録済みの声一覧</h4>
+        <div id="voice-manage-list" class="voice-manage-list">
+          <div class="empty-state">読み込み中...</div>
+        </div>
+      </div>
+
+      <!-- 新しい声を追加フォーム -->
+      <div class="voice-section">
+        <h4 class="section-title">新しい声を追加する</h4>
+        
+        <div class="voice-tabs-row">
+          <button id="vtab-upload" class="vtab-btn is-active" type="button">音声ファイルから作成</button>
+          <button id="vtab-id" class="vtab-btn" type="button">モデルIDを直接登録</button>
+        </div>
+
+        <!-- タブ1: 音声ファイルアップロードでクローン -->
+        <form id="form-clone-audio" class="vtab-panel">
+          <p class="form-hint">本人の声（15秒〜1分程度のクリアな音声ファイル: mp3 / wav / m4a）を選択してください。</p>
+          <div class="form-grid">
+            <label class="form-field">
+              <span class="field-label">声の名前 (ID名) *</span>
+              <input type="text" id="clone-voice-name" placeholder="例: tako_v2, ichikawa" required>
+            </label>
+            <label class="form-field">
+              <span class="field-label">音声ファイル (mp3 / wav / m4a) *</span>
+              <input type="file" id="clone-audio-file" accept="audio/*" required>
+            </label>
+            <label class="form-field form-full">
+              <span class="field-label">音声の書き起こしテキスト（任意・発音精度が向上）</span>
+              <input type="text" id="clone-ref-text" placeholder="例: こんにちは、市川拓です。よろしくお願いします。">
+            </label>
+          </div>
+          <div class="dialog-actions">
+            <span id="clone-status" class="persona-status"></span>
+            <button id="submit-clone-btn" class="btn-primary" type="submit">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-label">🎙️ クローンを作成して登録</span>
+            </button>
+          </div>
+        </form>
+
+        <!-- タブ2: Reference ID を直接登録 -->
+        <form id="form-link-id" class="vtab-panel is-hidden">
+          <p class="form-hint">Fish Audio Webサイト等で作成済みのモデルID（32桁）を入力して連携します。</p>
+          <div class="form-grid">
+            <label class="form-field">
+              <span class="field-label">声の名前 (表示名) *</span>
+              <input type="text" id="link-voice-name" placeholder="例: custom_voice" required>
+            </label>
+            <label class="form-field">
+              <span class="field-label">Fish Audio Reference ID (32桁) *</span>
+              <input type="text" id="link-voice-id" placeholder="例: 216ae90651fd45f58de1262710b67474" required>
+            </label>
+          </div>
+          <div class="dialog-actions">
+            <span id="link-status" class="persona-status"></span>
+            <button id="submit-link-btn" class="btn-primary" type="submit">
+              <span class="btn-label">➕ 登録する</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </dialog>

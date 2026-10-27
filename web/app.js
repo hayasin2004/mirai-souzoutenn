@@ -65,6 +65,32 @@ const els = {
   lineLogsList: $("line-logs-list"),
   lineLogsBadge: $("line-logs-badge"),
 
+  // LINEチャット履歴インポート
+  lineImportText: $("line-import-text"),
+  lineImportFile: $("line-import-file"),
+  lineImportFilename: $("line-import-filename"),
+  lineImportBtn: $("line-import-btn"),
+  lineImportStatus: $("line-import-status"),
+
+  // 声管理モーダル
+  manageVoicesBtn: $("manage-voices-btn"),
+  voiceDialog: $("voice-dialog"),
+  closeVoiceDialogBtn: $("close-voice-dialog-btn"),
+  voiceManageList: $("voice-manage-list"),
+  vtabUpload: $("vtab-upload"),
+  vtabId: $("vtab-id"),
+  formCloneAudio: $("form-clone-audio"),
+  formLinkId: $("form-link-id"),
+  cloneVoiceName: $("clone-voice-name"),
+  cloneAudioFile: $("clone-audio-file"),
+  cloneRefText: $("clone-ref-text"),
+  submitCloneBtn: $("submit-clone-btn"),
+  cloneStatus: $("clone-status"),
+  linkVoiceName: $("link-voice-name"),
+  linkVoiceId: $("link-voice-id"),
+  submitLinkBtn: $("submit-link-btn"),
+  linkStatus: $("link-status"),
+
   toast: $("toast"),
 };
 
@@ -346,6 +372,61 @@ if (els.lineLearnBtn) {
     }
   });
 }
+
+/* ---------- LINEチャット履歴の一括インポート・学習 ---------- */
+
+if (els.lineImportFile) {
+  els.lineImportFile.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (els.lineImportFilename) els.lineImportFilename.textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      els.lineImportText.value = evt.target.result;
+    };
+    reader.readAsText(file, "utf-8");
+  });
+}
+
+if (els.lineImportBtn) {
+  els.lineImportBtn.addEventListener("click", async () => {
+    const text = (els.lineImportText ? els.lineImportText.value : "").trim();
+    if (!text) {
+      showToast("チャット履歴のテキストを入力するかファイルを選択してください");
+      return;
+    }
+
+    els.lineImportBtn.disabled = true;
+    els.lineImportBtn.classList.add("is-loading");
+    els.lineImportBtn.querySelector(".btn-label").textContent = "Geminiが解析・学習中...";
+    if (els.lineImportStatus) els.lineImportStatus.textContent = "⏳ 会話ログの解析と人格学習を実行しています...";
+
+    try {
+      const res = await fetch("/api/line/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, auto_learn: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "インポートに失敗しました");
+
+      if (els.lineImportStatus) els.lineImportStatus.textContent = `✓ ${data.message}`;
+      showToast("チャット履歴を取り込み、AI人格に学習させました！");
+      if (els.lineImportText) els.lineImportText.value = "";
+      if (els.lineImportFilename) els.lineImportFilename.textContent = "";
+      if (els.lineImportFile) els.lineImportFile.value = "";
+      await loadLineStatus();
+    } catch (e) {
+      if (els.lineImportStatus) els.lineImportStatus.textContent = `❌ エラー: ${e.message}`;
+      showToast(e.message);
+    } finally {
+      els.lineImportBtn.disabled = false;
+      els.lineImportBtn.classList.remove("is-loading");
+      els.lineImportBtn.querySelector(".btn-label").textContent = "📥 チャットを読み込んで学習";
+    }
+  });
+}
+
 
 /* ---------- オーディオキュー管理（ストリーミング連続再生） ---------- */
 
@@ -1014,6 +1095,228 @@ async function savePersona() {
 els.personaBtn.addEventListener("click", openPersonaDialog);
 els.closeDialogBtn.addEventListener("click", () => els.dialog.close());
 els.savePersonaBtn.addEventListener("click", savePersona);
+
+/* ---------- クローン音声の管理・追加モーダル ---------- */
+
+async function openVoiceDialog() {
+  if (!els.voiceDialog) return;
+  if (els.cloneStatus) els.cloneStatus.textContent = "";
+  if (els.linkStatus) els.linkStatus.textContent = "";
+  await loadVoiceManageList();
+  els.voiceDialog.showModal();
+}
+
+async function loadVoiceManageList() {
+  if (!els.voiceManageList) return;
+  els.voiceManageList.innerHTML = '<div class="empty-state">読み込み中...</div>';
+  try {
+    const res = await fetch("/api/voices");
+    const data = await res.json();
+    renderVoiceManageList(data.voices || []);
+  } catch (e) {
+    els.voiceManageList.innerHTML = '<div class="empty-state">声一覧の取得に失敗しました</div>';
+  }
+}
+
+function renderVoiceManageList(voices) {
+  if (!els.voiceManageList) return;
+  els.voiceManageList.innerHTML = "";
+  if (!voices || voices.length === 0) {
+    els.voiceManageList.innerHTML = '<div class="empty-state">登録されている声がありません。下から追加してください。</div>';
+    return;
+  }
+
+  for (const v of voices) {
+    const card = document.createElement("div");
+    card.className = "voice-item-card";
+
+    const info = document.createElement("div");
+    info.className = "voice-item-info";
+    info.innerHTML = `
+      <span class="voice-item-name">${escapeHtml(v.name)}</span>
+      <span class="voice-item-id">ID: ${escapeHtml(v.id || "-")}</span>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "voice-item-actions";
+
+    const testBtn = document.createElement("button");
+    testBtn.type = "button";
+    testBtn.className = "btn-voice-test";
+    testBtn.textContent = "🔊 試聴";
+    testBtn.addEventListener("click", () => testVoice(v.name, testBtn));
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn-voice-delete";
+    deleteBtn.textContent = "🗑️ 削除";
+    deleteBtn.addEventListener("click", () => deleteVoice(v.name));
+
+    actions.append(testBtn, deleteBtn);
+    card.append(info, actions);
+    els.voiceManageList.append(card);
+  }
+}
+
+let testAudio = null;
+async function testVoice(voiceName, btn) {
+  if (testAudio) {
+    testAudio.pause();
+    testAudio = null;
+  }
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "生成中...";
+  try {
+    const res = await fetch("/api/voices/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voice: voiceName }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "試聴音声の生成に失敗しました");
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    testAudio = new Audio(url);
+    btn.textContent = "再生中...";
+    testAudio.onended = () => {
+      btn.textContent = originalText;
+      btn.disabled = false;
+    };
+    testAudio.onerror = () => {
+      btn.textContent = originalText;
+      btn.disabled = false;
+    };
+    await testAudio.play();
+  } catch (e) {
+    showToast(e.message);
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+async function deleteVoice(voiceName) {
+  if (!confirm(`本当に声「${voiceName}」を削除しますか？`)) return;
+  try {
+    const res = await fetch(`/api/voices/${encodeURIComponent(voiceName)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "削除に失敗しました");
+    }
+    showToast(`声「${voiceName}」を削除しました`);
+    await loadVoices();
+    await loadVoiceManageList();
+  } catch (e) {
+    showToast(e.message);
+  }
+}
+
+if (els.vtabUpload && els.vtabId) {
+  els.vtabUpload.addEventListener("click", () => {
+    els.vtabUpload.classList.add("is-active");
+    els.vtabId.classList.remove("is-active");
+    if (els.formCloneAudio) els.formCloneAudio.classList.remove("is-hidden");
+    if (els.formLinkId) els.formLinkId.classList.add("is-hidden");
+  });
+  els.vtabId.addEventListener("click", () => {
+    els.vtabId.classList.add("is-active");
+    els.vtabUpload.classList.remove("is-active");
+    if (els.formLinkId) els.formLinkId.classList.remove("is-hidden");
+    if (els.formCloneAudio) els.formCloneAudio.classList.add("is-hidden");
+  });
+}
+
+if (els.formCloneAudio) {
+  els.formCloneAudio.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = els.cloneVoiceName.value.trim();
+    const file = els.cloneAudioFile.files[0];
+    const refText = els.cloneRefText ? els.cloneRefText.value.trim() : "";
+
+    if (!name || !file) {
+      showToast("声の名前と音声ファイルは必須です");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("name", name);
+    formData.append("audio", file);
+    if (refText) formData.append("ref_text", refText);
+
+    els.submitCloneBtn.disabled = true;
+    els.submitCloneBtn.classList.add("is-loading");
+    if (els.cloneStatus) els.cloneStatus.textContent = "⏳ Fish Audio API でクローン生成中...";
+
+    try {
+      const res = await fetch("/api/voices", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "クローン作成に失敗しました");
+
+      if (els.cloneStatus) els.cloneStatus.textContent = "✓ クローン作成が完了しました！";
+      showToast(`新しい声「${name}」を登録しました！`);
+      els.cloneVoiceName.value = "";
+      els.cloneAudioFile.value = "";
+      if (els.cloneRefText) els.cloneRefText.value = "";
+      await loadVoices();
+      await loadVoiceManageList();
+      els.voice.value = name;
+    } catch (err) {
+      if (els.cloneStatus) els.cloneStatus.textContent = `❌ エラー: ${err.message}`;
+      showToast(err.message);
+    } finally {
+      els.submitCloneBtn.disabled = false;
+      els.submitCloneBtn.classList.remove("is-loading");
+    }
+  });
+}
+
+if (els.formLinkId) {
+  els.formLinkId.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = els.linkVoiceName.value.trim();
+    const voiceId = els.linkVoiceId.value.trim();
+
+    if (!name || !voiceId) {
+      showToast("声の名前とReference IDを入力してください");
+      return;
+    }
+
+    els.submitLinkBtn.disabled = true;
+    if (els.linkStatus) els.linkStatus.textContent = "⏳ 登録中...";
+
+    try {
+      const res = await fetch("/api/voices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, id: voiceId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "登録に失敗しました");
+
+      if (els.linkStatus) els.linkStatus.textContent = "✓ 登録しました！";
+      showToast(`声「${name}」を登録しました！`);
+      els.linkVoiceName.value = "";
+      els.linkVoiceId.value = "";
+      await loadVoices();
+      await loadVoiceManageList();
+      els.voice.value = name;
+    } catch (err) {
+      if (els.linkStatus) els.linkStatus.textContent = `❌ エラー: ${err.message}`;
+      showToast(err.message);
+    } finally {
+      els.submitLinkBtn.disabled = false;
+    }
+  });
+}
+
+if (els.manageVoicesBtn) els.manageVoicesBtn.addEventListener("click", openVoiceDialog);
+if (els.closeVoiceDialogBtn && els.voiceDialog) els.closeVoiceDialogBtn.addEventListener("click", () => els.voiceDialog.close());
+
 
 /* ---------- イベントリスナー ---------- */
 

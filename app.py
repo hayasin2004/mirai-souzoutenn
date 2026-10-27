@@ -27,9 +27,10 @@ from fishaudio.exceptions import (
     NotFoundError,
     RateLimitError,
 )
+from datetime import datetime
 from fishaudio.types import TTSConfig
 
-from voice_clone import BASE_DIR, DEFAULT_MODEL, load_voices, resolve_voice_id
+from voice_clone import BASE_DIR, DEFAULT_MODEL, load_voices, resolve_voice_id, save_voices
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -112,11 +113,116 @@ def api_config():
 @app.get("/api/voices")
 def api_voices():
     voices = load_voices()
+    res_list = []
+    for name, v in voices.items():
+        res_list.append({
+            "name": name,
+            "id": v.get("id"),
+            "source": v.get("source", "-"),
+            "created_at": v.get("created_at", "-"),
+        })
     return jsonify(
-        voices=[{"name": name, "id": v["id"]} for name, v in voices.items()],
+        voices=res_list,
         model=DEFAULT_MODEL,
         max_length=MAX_TEXT_LENGTH,
     )
+
+
+@app.post("/api/voices")
+def api_create_voice():
+    """新しい声の追加（ID直接指定、または音声ファイルアップロードでのクローン生成）"""
+    voices = load_voices()
+
+    # 1. 音声ファイルアップロードの場合 (multipart/form-data)
+    if "audio" in request.files:
+        audio_file = request.files["audio"]
+        name = request.form.get("name", "").strip()
+        ref_text = request.form.get("ref_text", "").strip()
+        if not name:
+            return error("声の名前を入力してください。", 400)
+        if name in voices:
+            return error(f"声の名前 '{name}' は既に使用されています。", 400)
+        if not audio_file or not audio_file.filename:
+            return error("音声ファイルを選択してください。", 400)
+
+        audio_bytes = audio_file.read()
+        if not audio_bytes:
+            return error("音声ファイルが空です。", 400)
+
+        try:
+            fish_client = get_fish_client()
+            voice_obj = fish_client.voices.create(
+                title=name,
+                voices=[audio_bytes],
+                texts=[ref_text] if ref_text else None,
+                visibility="private",
+                enhance_audio_quality=True,
+            )
+            voice_id = voice_obj.id
+            voices[name] = {
+                "id": voice_id,
+                "source": audio_file.filename,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            save_voices(voices)
+            return jsonify(status="ok", name=name, id=voice_id)
+        except Exception as e:
+            return error(f"音声クローン作成に失敗しました: {str(e)}", 502)
+
+    # 2. JSON で Reference ID 直接登録の場合
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    voice_id = str(data.get("id", "")).strip()
+
+    if not name:
+        return error("声の名前を入力してください。", 400)
+    if not voice_id:
+        return error("Fish Audio の Reference ID (モデルID) を入力してください。", 400)
+    if name in voices:
+        return error(f"声の名前 '{name}' は既に使用されています。", 400)
+
+    voices[name] = {
+        "id": voice_id,
+        "source": "manual_id",
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    save_voices(voices)
+    return jsonify(status="ok", name=name, id=voice_id)
+
+
+@app.delete("/api/voices/<name>")
+def api_delete_voice(name):
+    """登録されている声を削除"""
+    voices = load_voices()
+    if name not in voices:
+        return error(f"声 '{name}' は見つかりません。", 404)
+    del voices[name]
+    save_voices(voices)
+    return jsonify(status="ok", deleted=name)
+
+
+@app.post("/api/voices/test")
+def api_test_voice():
+    """指定した声でテスト音声を生成・再生"""
+    data = request.get_json(silent=True) or {}
+    voice = str(data.get("voice", "")).strip()
+    test_text = str(data.get("text", "")).strip() or "こんにちは。これはクローン音声のテスト発声です。"
+    if not voice:
+        return error("声を選択してください。", 400)
+
+    try:
+        fish_client = get_fish_client()
+        audio = fish_client.tts.convert(
+            text=test_text,
+            reference_id=resolve_voice_id(voice),
+            config=TTSConfig(format="mp3", latency="balanced"),
+            model=DEFAULT_MODEL,
+        )
+        if not isinstance(audio, bytes):
+            audio = b"".join(audio)
+        return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        return error(f"試聴音声の生成に失敗しました: {str(e)}", 502)
 
 
 @app.get("/api/persona")
@@ -581,6 +687,7 @@ from line_bot import (
     update_persona_from_logs,
     send_proactive_question_to_users,
     start_proactive_scheduler,
+    import_line_chat_history,
 )
 
 
@@ -684,6 +791,28 @@ def api_line_learn():
         return error(result.get("message", "学習に失敗しました"), 400)
 
     return jsonify(result)
+
+
+@app.post("/api/line/import")
+def api_line_import():
+    """LINE公式アカウント管理画面のチャット欄テキスト等を解析し、会話ログ復元＆学習"""
+    gemini_key = get_gemini_api_key()
+    if not gemini_key:
+        return error("Gemini API キーが設定されていません", 400)
+
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text", "")).strip()
+    auto_learn = bool(data.get("auto_learn", True))
+
+    if not text:
+        return error("チャット履歴のテキストを入力してください。", 400)
+
+    result = import_line_chat_history(text, gemini_key, auto_learn=auto_learn)
+    if not result.get("success"):
+        return error(result.get("message", "チャット履歴の取り込みに失敗しました"), 400)
+
+    return jsonify(result)
+
 
 
 @app.get("/<path:path>")

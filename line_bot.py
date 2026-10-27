@@ -489,3 +489,125 @@ def start_proactive_scheduler(gemini_api_key: str, access_token: str, check_inte
 
     t = threading.Thread(target=worker, daemon=True)
     t.start()
+
+
+def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: bool = True) -> Dict[str, Any]:
+    """
+    LINE Official Account Managerのチャット欄コピペやトーク履歴テキストをGeminiで構造化抽出し、
+    会話ログとして保存＆persona.txtに自動学習させる（DB管理不要）
+    """
+    from google import genai
+    from google.genai import types
+
+    raw_text = raw_text.strip()
+    if not raw_text:
+        return {"success": False, "message": "テキストが空です。", "imported_count": 0}
+
+    # 生ログのバックアップ保存
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    raw_backup_file = DATA_DIR / "line_imported_raw.txt"
+    try:
+        with open(raw_backup_file, "a", encoding="utf-8") as f:
+            f.write(f"\n--- インポート日時: {datetime.now().isoformat()} ---\n{raw_text}\n")
+    except Exception as e:
+        print(f"[WARN] バックアップ書き込み失敗: {e}")
+
+    # Geminiで構造化抽出
+    instruction = (
+        "あなたはLINEのチャット画面テキストやトーク履歴を解析・構造化する専門アシスタントです。\n"
+        "以下に、LINE公式アカウント管理画面のチャット欄をコピーしたテキスト、またはエクスポートされたトーク履歴テキストが渡されます。\n\n"
+        "【入力テキスト】\n"
+        f"{raw_text[:15000]}\n\n"
+        "【タスク】\n"
+        "このテキストから、市川拓さん（本人）の発言と、相手（AI、友達、ボットなど）の発言のやり取り（1往復ごと）を抽出してください。\n"
+        "もし相手の発言がない場合や本人の一方的な発言・メモの場合は、ai_reply を「（LINEトーク履歴より記録）」としてください。\n\n"
+        "【出力ルール】\n"
+        "・必ず有効なJSON配列（リスト）のみを出力してください。\n"
+        "・マークダウン記法（```json など）は付けずに純粋なJSON文字列で出力してください。\n"
+        "・フォーマット例:\n"
+        "[\n"
+        '  {"user_message": "本人の発言内容", "ai_reply": "相手の発言内容", "timestamp": "2024-10-27T10:00:00"}\n'
+        "]"
+    )
+
+    client = genai.Client(api_key=gemini_api_key)
+    json_text = ""
+
+    for model_name in ["gemini-3.5-flash-lite", "gemini-flash-latest"]:
+        try:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=instruction,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=4000,
+                ),
+            )
+            if resp and resp.text:
+                json_text = resp.text.strip()
+                break
+        except Exception as e:
+            print(f"[WARN] チャット解析生成失敗 ({model_name}): {e}")
+            continue
+
+    if not json_text:
+        return {"success": False, "message": "Geminiによるチャットテキストの解析に失敗しました。", "imported_count": 0}
+
+    # JSONパース（```json などのコードブロックが含まれていた場合は除去）
+    if json_text.startswith("```"):
+        lines = json_text.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        json_text = "\n".join(lines).strip()
+
+    try:
+        parsed_items = json.loads(json_text)
+        if not isinstance(parsed_items, list):
+            parsed_items = [parsed_items]
+    except Exception as e:
+        print(f"[ERROR] JSONデコード失敗: {e}\n{json_text}")
+        return {"success": False, "message": f"会話データの抽出形式エラー: {e}", "imported_count": 0}
+
+    if not parsed_items:
+        return {"success": False, "message": "会話データが見つかりませんでした。テキストの内容を確認してください。", "imported_count": 0}
+
+    # ログを蓄積
+    imported_count = 0
+    with _logs_lock:
+        existing_logs = load_line_logs()
+        now_iso = datetime.now().isoformat()
+        for idx, item in enumerate(parsed_items):
+            u_msg = str(item.get("user_message", "")).strip()
+            a_msg = str(item.get("ai_reply", "（LINEトーク履歴より記録）")).strip()
+            ts = item.get("timestamp") or now_iso
+            if not u_msg:
+                continue
+            log_item = {
+                "id": f"import_{int(time.time() * 1000)}_{idx}",
+                "user_id": "line_chat_import",
+                "timestamp": ts,
+                "user_message": u_msg,
+                "ai_reply": a_msg,
+                "learned": False,
+            }
+            existing_logs.append(log_item)
+            imported_count += 1
+
+        with open(LOGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(existing_logs, f, ensure_ascii=False, indent=2)
+
+    # 自動学習（persona.txt の更新）
+    learn_msg = ""
+    if auto_learn and imported_count > 0:
+        learn_res = update_persona_from_logs(gemini_api_key)
+        learn_msg = learn_res.get("message", "")
+
+    return {
+        "success": True,
+        "message": f"{imported_count} 件の会話ログをチャット履歴から取り込みました！" + (f"\n{learn_msg}" if learn_msg else ""),
+        "imported_count": imported_count,
+        "learned": auto_learn,
+    }
+
