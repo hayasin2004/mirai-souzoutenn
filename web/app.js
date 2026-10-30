@@ -1265,7 +1265,7 @@ async function setSlotImageDataUrl(slotKey, rawDataUrl) {
 /* ---------- Vtuber アバター自動生成 & スタイル切り替え ---------- */
 
 async function generateAndApplyVtuberAvatar(canvasOrImg = null) {
-  if (!window.FaceMirrorEngine || !window.FaceMirrorEngine.generateVtuberAvatar) return;
+  if (!window.FaceMirrorEngine) return;
   const source = canvasOrImg || avatarEngine?.images?.base;
   if (!source) {
     showToast("先に正面の顔写真をアップロードまたは撮影してください");
@@ -1275,36 +1275,69 @@ async function generateAndApplyVtuberAvatar(canvasOrImg = null) {
   if (els.generateVtuberBtn) {
     els.generateVtuberBtn.disabled = true;
     els.generateVtuberBtn.classList.add("is-loading");
-    els.generateVtuberBtn.querySelector(".btn-label").textContent = "首から上アバターを生成中...";
+    els.generateVtuberBtn.querySelector(".btn-label").textContent = "AIで表情差分（通常・口開け・笑顔・目閉じ）を生成中...";
   }
 
   try {
     const anchors = studioDraft.anchors || avatarEngine?.anchors;
-    const vtuberCanvas = window.FaceMirrorEngine.generateVtuberAvatar(source, anchors);
-    const vtuberDataUrl = vtuberCanvas.toDataURL("image/png");
-    studioDraft.photos.vtuber = vtuberDataUrl;
+
+    // 1. まずフロントエンドの歪みゼロ・スプライト生成エンジンで4差分を即時作成
+    const spriteSet = window.FaceMirrorEngine.generateVtuberSpriteSet(
+      source,
+      avatarEngine?.images?.open || null,
+      avatarEngine?.images?.smile || null,
+      anchors
+    );
+    studioDraft.photos.vtuber = spriteSet.vtuber.toDataURL("image/png");
+    studioDraft.photos.vtuber_open = spriteSet.vtuber_open.toDataURL("image/png");
+    studioDraft.photos.vtuber_smile = spriteSet.vtuber_smile.toDataURL("image/png");
+    studioDraft.photos.vtuber_blink = spriteSet.vtuber_blink.toDataURL("image/png");
+
+    // 2. バックエンドの外部AIエンドポイント (/api/avatars/generate-ai) を呼び出し
+    // （OpenAI / Gemini有料枠が設定されていればクラウドAI生成画像で上書き）
+    const baseDataUrl = studioDraft.photos.base || source.toDataURL("image/jpeg", 0.92);
+    let aiMessage = "✨ 写真を基に「通常・口開け・笑顔・目閉じ」の4枚のアルターエゴ表情差分を生成しました！";
+    try {
+      const res = await fetch("/api/avatars/generate-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo: baseDataUrl, anchors }),
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "ok" && data.sprites) {
+        if (data.sprites.vtuber) studioDraft.photos.vtuber = data.sprites.vtuber;
+        if (data.sprites.vtuber_open) studioDraft.photos.vtuber_open = data.sprites.vtuber_open;
+        if (data.sprites.vtuber_smile) studioDraft.photos.vtuber_smile = data.sprites.vtuber_smile;
+        if (data.sprites.vtuber_blink) studioDraft.photos.vtuber_blink = data.sprites.vtuber_blink;
+        aiMessage = `✨ 外部AI (${data.provider.toUpperCase()}) で本人そっくりの表情差分アバターを生成しました！`;
+      } else if (data.message) {
+        aiMessage = data.message;
+      }
+    } catch (apiErr) {
+      console.warn("外部AI生成API呼び出しスキップ（内蔵スプライトを使用）:", apiErr);
+    }
 
     if (avatarEngine) {
       avatarEngine.settings.avatarStyle = "vtuber";
       await avatarEngine.loadAvatarData({
-        name: els.avatarNameInput.value || "マイVtuberアバター",
+        name: els.avatarNameInput.value || "マイアルターエゴ",
         photos: studioDraft.photos,
         landmarks: { anchors: studioDraft.anchors },
         settings: avatarEngine.settings,
       });
-      avatarEngine.triggerTestSpeak("写真を基に、首から上だけの本人そっくりアバターを生成したよ！どうかな？");
+      avatarEngine.triggerTestSpeak("表情差分の立ち絵を切り替えて喋るアルターエゴ方式になったよ！どうかな？");
     }
 
     syncAvatarStyleUI("vtuber");
-    showToast("✨ 写真を基に、首から上だけの本人そっくりアバター（アルターエゴ風）を生成しました！");
+    showToast(aiMessage);
   } catch (err) {
-    console.error("Vtuber生成失敗:", err);
-    showToast("Vtuberアバターの生成中にエラーが発生しました: " + err.message);
+    console.error("アバター差分生成失敗:", err);
+    showToast("アバター生成中にエラーが発生しました: " + err.message);
   } finally {
     if (els.generateVtuberBtn) {
       els.generateVtuberBtn.disabled = false;
       els.generateVtuberBtn.classList.remove("is-loading");
-      els.generateVtuberBtn.querySelector(".btn-label").textContent = "✨ 写真から首から上アバターを生成";
+      els.generateVtuberBtn.querySelector(".btn-label").textContent = "✨ 写真から首から上アバター（表情差分）を生成";
     }
   }
 }
