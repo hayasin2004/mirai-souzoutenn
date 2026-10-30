@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css?v=vtuber2">
+  <link rel="stylesheet" href="/style.css?v=alterego1">
 </head>
 <body>
   <div class="bg-orb orb-1" aria-hidden="true"></div>
@@ -192,18 +192,18 @@
         <!-- Vtuberアバター自動生成コントロール -->
         <div class="vtuber-gen-banner">
           <div class="vtuber-gen-info">
-            <span class="vtuber-badge">✨ AI VTUBER</span>
-            <strong>写真を基に、違和感のないVtuberアバターを自動生成！</strong>
-            <span class="vtuber-subtext">本人の特徴（髪型・メガネ・顔立ち）を忠実にアニメ調アバター化します</span>
+            <span class="vtuber-badge">💻 ALTER EGO AVATAR</span>
+            <strong>写真を基に、首から上だけで本人そっくりのアバターを自動生成！</strong>
+            <span class="vtuber-subtext">背景や服を切り離し、ダンガンロンパのアルターエゴのように写真の人そっくりな首から上アバターを生成します</span>
           </div>
           <div class="vtuber-gen-actions">
             <select id="vtuber-style-select" class="select-input vtuber-style-select" title="アバタースタイルを選択">
-              <option value="vtuber" selected>🌟 Vtuberアバター（Live2Dアニメ調・推奨）</option>
+              <option value="vtuber" selected>💻 アルターエゴ（首から上・本人そっくりアバター）</option>
               <option value="photomesh">📸 リアル写真メッシュ（従来のモード）</option>
             </select>
             <button id="generate-vtuber-btn" class="btn-primary btn-generate-vtuber" type="button">
               <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-label">✨ 写真からVtuberアバターを生成</span>
+              <span class="btn-label">✨ 写真から首から上アバターを生成</span>
             </button>
           </div>
         </div>
@@ -229,17 +229,17 @@
             <label class="slider-item">
               <div class="slider-head">
                 <span>アバタースタイル</span>
-                <output id="val-avatar-style">Vtuber</output>
+                <output id="val-avatar-style">アルターエゴ</output>
               </div>
               <select id="slider-avatar-style" class="select-input select-sm">
-                <option value="vtuber" selected>🌟 Vtuberアバター（推奨）</option>
+                <option value="vtuber" selected>💻 アルターエゴ（首から上アバター）</option>
                 <option value="photomesh">📸 リアル写真メッシュ</option>
               </select>
             </label>
 
             <label class="slider-item">
               <div class="slider-head">
-                <span>チーク血色感（かわいさ）</span>
+                <span>デジタルモニター演出（走査線・発光）</span>
                 <output id="val-vtuber-cheek">1.00x</output>
               </div>
               <input id="slider-vtuber-cheek" type="range" min="0.0" max="2.0" step="0.05" value="1.0">
@@ -247,7 +247,7 @@
 
             <label class="slider-item">
               <div class="slider-head">
-                <span>瞳のハイライト輝き</span>
+                <span>瞳のキャッチライト強さ</span>
                 <output id="val-vtuber-shine">1.20x</output>
               </div>
               <input id="slider-vtuber-shine" type="range" min="0.0" max="2.5" step="0.05" value="1.2">
@@ -377,7 +377,7 @@
         </div>
         <div class="avatar-toolbar">
           <button id="avatar-style-btn" class="btn-chip btn-chip-style" type="button" title="Vtuber / リアル写真モードを切り替え">
-            🌟 Vtuber
+            💻 アルターエゴ
           </button>
           <button id="avatar-test-btn" class="btn-chip" type="button" title="口パクと表情のテスト動作">
             🗣 テスト発話
@@ -478,7 +478,7 @@
 
   <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
 
-  <script src="/avatar.js?v=vtuber2"></script>
-  <script src="/app.js?v=vtuber2"></script>
+  <script src="/avatar.js?v=alterego1"></script>
+  <script src="/app.js?v=alterego1"></script>
 </body>
 </html>

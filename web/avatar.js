@@ -661,10 +661,10 @@
    */
   
   /* ==========================================================================
-   * Mirai Vtuber Avatar Generator & Hybrid Live2D Face Styling Pipeline
-   * 「Vtuberの顔をそのまま人の顔にする」ハイブリッド生成エンジン：
-   * - 写真から本人の顔立ち・肌色・髪色を抽出し、不気味な生写真感を消す美肌セルシェーディングを適用
-   * - Live2D風の2.5D身体・衣装・首・髪パーツと本人の顔をシームレスに融合
+   * Mirai Alter-Ego Avatar Generator (首から上だけ・写真の人そっくりアバター生成)
+   * - 写真から「首から上（頭髪・顔・耳・首上部）」のみを高精度に切り抜き、背景や服・肩を除去
+   * - エッジ保持バイラテラル平滑化＋本人固有の顔パーツ線画抽出により、
+   *   写真の本人そっくりのまま違和感のない 2.5D デジタルアバター（アルターエゴ風）へ変換
    * ========================================================================== */
 
   function enrichAnchors(rawAnchors) {
@@ -687,7 +687,7 @@
       const y0 = Math.max(0, Math.floor(cy - radius));
       const w = Math.min(ctx.canvas.width - x0, radius * 2);
       const h = Math.min(ctx.canvas.height - y0, radius * 2);
-      if (w <= 0 || h <= 0) return { r: 242, g: 202, b: 182 };
+      if (w <= 0 || h <= 0) return { r: 235, g: 195, b: 175 };
       const imgData = ctx.getImageData(x0, y0, w, h);
       const data = imgData.data;
       let r = 0, g = 0, b = 0, count = 0;
@@ -700,9 +700,9 @@
       }
       return count > 0
         ? { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) }
-        : { r: 242, g: 202, b: 182 };
+        : { r: 235, g: 195, b: 175 };
     } catch (_) {
-      return { r: 242, g: 202, b: 182 };
+      return { r: 235, g: 195, b: 175 };
     }
   }
 
@@ -716,40 +716,23 @@
   }
 
   function clampSkinPalette(rawSkin) {
-    // 暗い照明の写真でもVtuberの首・耳・肌トーンが健康的で綺麗に見えるよう補正
     const lum = rawSkin.r * 0.299 + rawSkin.g * 0.587 + rawSkin.b * 0.114;
-    const boost = lum < 155 ? Math.min(1.45, 175 / Math.max(60, lum)) : lum > 235 ? 0.94 : 1.04;
-    const r = Math.min(252, Math.max(195, Math.round(rawSkin.r * boost + 8)));
-    const g = Math.min(232, Math.max(158, Math.round(rawSkin.g * boost + 4)));
-    const b = Math.min(218, Math.max(138, Math.round(rawSkin.b * boost + 2)));
+    const boost = lum < 140 ? Math.min(1.35, 160 / Math.max(55, lum)) : lum > 240 ? 0.95 : 1.02;
+    const r = Math.min(250, Math.max(175, Math.round(rawSkin.r * boost)));
+    const g = Math.min(230, Math.max(140, Math.round(rawSkin.g * boost)));
+    const b = Math.min(215, Math.max(120, Math.round(rawSkin.b * boost)));
     return {
       r,
       g,
       b,
       baseHex: rgbToHex(r, g, b),
       lightHex: rgbToHex(Math.min(255, r + 14), Math.min(255, g + 12), Math.min(255, b + 12)),
-      shadowHex: rgbToHex(Math.round(r * 0.84), Math.round(g * 0.78), Math.round(b * 0.78)),
-      deepShadowHex: rgbToHex(Math.round(r * 0.68), Math.round(g * 0.60), Math.round(b * 0.62)),
-    };
-  }
-
-  function clampHairPalette(rawHair) {
-    const r = Math.min(210, Math.max(20, rawHair.r));
-    const g = Math.min(200, Math.max(18, rawHair.g));
-    const b = Math.min(220, Math.max(24, rawHair.b));
-    return {
-      r,
-      g,
-      b,
-      baseHex: rgbToHex(r, g, b),
-      darkHex: rgbToHex(Math.round(r * 0.65), Math.round(g * 0.65), Math.round(b * 0.70)),
-      lightHex: rgbToHex(Math.min(255, r + 48), Math.min(255, g + 45), Math.min(255, b + 55)),
+      shadowHex: rgbToHex(Math.round(r * 0.82), Math.round(g * 0.78), Math.round(b * 0.78)),
     };
   }
 
   /**
-   * 写真と顔アンカーから、Vtuberの頭部にそのまま自然に馴染む「美肌・アニメ調スタイライズ顔テクスチャ (720x720)」を生成する
-   * 本人の目・眉・鼻・メガネ・髪型などの個性を維持したまま、生写真のザラつきや不気味さを解消する
+   * 写真と顔アンカーから、「首から上だけ・写真の人そっくり」のデジタルアバター（アルターエゴ風 720x720 透過Canvas）を生成
    */
   function generateVtuberAvatar(sourceImage, anchors = null, options = {}) {
     const size = 720;
@@ -761,21 +744,22 @@
     const A = enrichAnchors(anchors);
 
     // 1. 元写真をキャンバスに描画
+    ctx.clearRect(0, 0, size, size);
     ctx.drawImage(sourceImage, 0, 0, size, size);
 
-    // 2. 本人の肌色・髪色・唇色をサンプリング
-    const sNose = sampleAverageRgb(ctx, A.noseBridge.x * size, A.noseBridge.y * size, 9);
+    // 2. 本人の肌色と背景色（四隅・外周）をサンプリング
+    const sNose = sampleAverageRgb(ctx, A.noseBridge.x * size, A.noseBridge.y * size, 8);
     const sCheekL = sampleAverageRgb(
       ctx,
       (A.leftCheek.x * 0.55 + A.noseTip.x * 0.45) * size,
       A.leftCheek.y * size,
-      10
+      9
     );
     const sCheekR = sampleAverageRgb(
       ctx,
       (A.rightCheek.x * 0.55 + A.noseTip.x * 0.45) * size,
       A.rightCheek.y * size,
-      10
+      9
     );
     const avgSkin = {
       r: Math.round((sNose.r + sCheekL.r + sCheekR.r) / 3),
@@ -784,141 +768,238 @@
     };
     const skinPalette = clampSkinPalette(avgSkin);
 
-    const hairSampleY = Math.max(12, (A.forehead.y - (A.chin.y - A.forehead.y) * 0.28) * size);
-    const rawHair = sampleAverageRgb(ctx, A.forehead.x * size, hairSampleY, 14);
-    const hairPalette = clampHairPalette(rawHair);
+    // 写真の背景色サンプル（背景を自動透過させるための基準色）
+    const bgSamples = [
+      sampleAverageRgb(ctx, 18, 18, 10),
+      sampleAverageRgb(ctx, size - 18, 18, 10),
+      sampleAverageRgb(ctx, 18, size * 0.32, 10),
+      sampleAverageRgb(ctx, size - 18, size * 0.32, 10),
+      sampleAverageRgb(ctx, 18, size * 0.62, 10),
+      sampleAverageRgb(ctx, size - 18, size * 0.62, 10),
+    ];
 
-    const lipRgb = sampleAverageRgb(ctx, A.lipCenter.x * size, A.lipCenter.y * size, 6);
-
-    // 3. Vtuber 美肌・セルルック調和フィルター（目・眉・メガネ・髪の輪郭はくっきり保ちつつ肌を陶器のように滑らかに）
+    // 3. 首から上だけの切り抜き＋本人そっくりデジタルアバター質感フィルター
     try {
       const imgData = ctx.getImageData(0, 0, size, size);
-      const d = imgData.data;
+      const src = new Uint8ClampedArray(imgData.data);
+      const dst = imgData.data;
 
-      const faceCx = A.faceCenter.x * size;
-      const faceCy = A.faceCenter.y * size;
-      const rx = Math.max(80, (A.rightCheek.x - A.leftCheek.x) * size * 0.68);
-      const ry = Math.max(100, (A.chin.y - A.forehead.y) * size * 0.72);
+      const cx = A.faceCenter.x * size;
+      const foreheadY = A.forehead.y * size;
+      const chinX = A.chin.x * size;
+      const chinY = A.chin.y * size;
+      const cheekY = ((A.leftCheek.y + A.rightCheek.y) * 0.5) * size;
+      const jawY = ((A.leftJaw.y + A.rightJaw.y) * 0.5) * size;
 
-      // 目と口の保護領域（シャープさを100%維持する）
-      const lEyeX = A.leftEye.x * size;
-      const lEyeY = A.leftEye.y * size;
-      const rEyeX = A.rightEye.x * size;
-      const rEyeY = A.rightEye.y * size;
-      const eyeProtectR = Math.max(24, (A.rightEye.x - A.leftEye.x) * size * 0.24);
+      const faceW = Math.max(size * 0.28, (A.rightCheek.x - A.leftCheek.x) * size);
+      const faceH = Math.max(size * 0.30, (A.chin.y - A.forehead.y) * size);
+      const jawHalfW = Math.max(faceW * 0.36, (A.rightJaw.x - A.leftJaw.x) * size * 0.52);
 
-      const mouthCx = A.lipCenter.x * size;
-      const mouthCy = A.lipCenter.y * size;
-      const mouthProtectRx = Math.max(28, (A.mouthRight.x - A.mouthLeft.x) * size * 0.62);
-      const mouthProtectRy = Math.max(18, (A.lowerLipBottom.y - A.upperLipTop.y) * size * 0.85);
+      // 頭髪を含む頭部全体の楕円中心と半径
+      const headCenterY = foreheadY + faceH * 0.22;
+      const headOuterRx = Math.max(faceW * 0.86, size * 0.30);
+      const headOuterRy = Math.max(faceH * 0.94, size * 0.34);
+
+      // 首の上端〜下端（首から上だけ残し、服や肩は完全にカット）
+      const neckBottomY = Math.min(size * 0.90, chinY + faceH * 0.17);
+      const neckHalfW = faceW * 0.23;
 
       for (let y = 0; y < size; y++) {
-        const ny = (y - faceCy) / ry;
-        if (Math.abs(ny) > 1.25) continue;
         for (let x = 0; x < size; x++) {
-          const nx = (x - faceCx) / rx;
-          const ellDist = Math.hypot(nx, ny);
-          if (ellDist > 1.2) continue;
-
-          // 目・口の中心部はディテールを保護
-          const dLEye = Math.hypot(x - lEyeX, y - lEyeY);
-          const dREye = Math.hypot(x - rEyeX, y - rEyeY);
-          if (dLEye < eyeProtectR || dREye < eyeProtectR) continue;
-          const dMouth = Math.hypot((x - mouthCx) / mouthProtectRx, (y - mouthCy) / mouthProtectRy);
-          if (dMouth < 0.9) continue;
-
           const idx = (y * size + x) * 4;
-          const r = d[idx];
-          const g = d[idx + 1];
-          const b = d[idx + 2];
-
-          // 肌色ピクセル判定（影や色ムラをアニメ美肌トーンへソフトに均一化）
-          const colorDiff = Math.abs(r - avgSkin.r) + Math.abs(g - avgSkin.g) + Math.abs(b - avgSkin.b);
-          if (colorDiff < 135 && r > g * 0.92 && g > b * 0.82) {
-            const radialWeight = Math.max(0, 1 - ellDist / 1.2);
-            const smoothStrength = radialWeight * 0.46;
-            // 元の陰影ニュアンスを少し残しながらVtuberの明るい美肌トーンへ寄せる
-            const targetR = skinPalette.r * 0.72 + Math.min(255, r * 1.06) * 0.28;
-            const targetG = skinPalette.g * 0.72 + Math.min(255, g * 1.05) * 0.28;
-            const targetB = skinPalette.b * 0.72 + Math.min(255, b * 1.05) * 0.28;
-
-            d[idx] = Math.min(255, Math.round(r * (1 - smoothStrength) + targetR * smoothStrength));
-            d[idx + 1] = Math.min(255, Math.round(g * (1 - smoothStrength) + targetG * smoothStrength));
-            d[idx + 2] = Math.min(255, Math.round(b * (1 - smoothStrength) + targetB * smoothStrength));
+          if (src[idx + 3] < 16) {
+            dst[idx + 3] = 0;
+            continue;
           }
+
+          // --- (A) 「首から上だけ」のシルエットマスク計算 ---
+          let maskAlpha = 0.0;
+
+          // Y座標に応じた顔内部の横幅（額〜頬〜エラ〜顎先の自然な輪郭）
+          let faceHalfWAtY = 0;
+          if (y >= foreheadY - faceH * 0.25 && y <= chinY) {
+            if (y <= cheekY) {
+              faceHalfWAtY = faceW * 0.54;
+            } else if (y <= jawY) {
+              const t = (y - cheekY) / Math.max(1, jawY - cheekY);
+              faceHalfWAtY = faceW * 0.54 * (1 - t) + jawHalfW * t;
+            } else {
+              const t = Math.min(1, (y - jawY) / Math.max(1, chinY - jawY));
+              faceHalfWAtY = jawHalfW * Math.pow(Math.max(0, 1 - t * t), 0.56);
+            }
+          }
+
+          const distFromFaceCenter = Math.abs(x - cx);
+          const isInsideFaceCore = y >= foreheadY - faceH * 0.12 && y <= chinY && distFromFaceCenter <= faceHalfWAtY * 0.96;
+
+          if (isInsideFaceCore) {
+            // 顔の内部は100%不透明で保持
+            maskAlpha = 1.0;
+          } else if (y > jawY) {
+            // エラより下：顎ライン内側、または顎直下の短い首元のみ滑らかに残し、肩・服は完全除去
+            const distFromChinX = Math.abs(x - chinX);
+            if (y <= chinY && distFromFaceCenter <= faceHalfWAtY * 1.08) {
+              const edgeT = (distFromFaceCenter - faceHalfWAtY * 0.96) / Math.max(1, faceHalfWAtY * 0.12);
+              maskAlpha = Math.max(0, 1 - edgeT);
+            }
+
+            // 首の上部（顎下から少しだけスッとフェードアウトするアルターエゴ風の首元）
+            if (y >= chinY - faceH * 0.06 && y <= neckBottomY && distFromChinX <= neckHalfW) {
+              const vFade = 1 - Math.pow(Math.max(0, (y - (chinY - faceH * 0.02)) / Math.max(1, neckBottomY - chinY)), 1.4);
+              const hFade = 1 - Math.pow(distFromChinX / neckHalfW, 2.2);
+              const neckAlpha = Math.max(0, Math.min(1, vFade * hFade));
+              maskAlpha = Math.max(maskAlpha, neckAlpha);
+            }
+          } else {
+            // エラより上（頭頂・前髪・サイドの髪・耳を含む頭部領域）
+            const ellX = (x - cx) / headOuterRx;
+            const ellY = (y - headCenterY) / headOuterRy;
+            const ellDist = Math.hypot(ellX, ellY);
+
+            if (ellDist <= 1.05) {
+              // 基本の頭部オーバルフェザー
+              let headAlpha = ellDist <= 0.78 ? 1.0 : Math.max(0, 0.5 * (1 + Math.cos(Math.PI * (ellDist - 0.78) / 0.27)));
+
+              // 外周付近で写真の背景色と一致するピクセルを自動透過（髪のシルエットを綺麗に出す）
+              if (ellDist > 0.52) {
+                const pr = src[idx];
+                const pg = src[idx + 1];
+                const pb = src[idx + 2];
+                let minBgDiff = 999;
+                for (let b = 0; b < bgSamples.length; b++) {
+                  const s = bgSamples[b];
+                  const diff = Math.abs(pr - s.r) + Math.abs(pg - s.g) + Math.abs(pb - s.b);
+                  if (diff < minBgDiff) minBgDiff = diff;
+                }
+                if (minBgDiff < 58) {
+                  const bgKeep = Math.max(0, (minBgDiff - 18) / 40);
+                  const outerWeight = Math.min(1, (ellDist - 0.52) / 0.28);
+                  headAlpha *= (1 - outerWeight) + outerWeight * bgKeep;
+                }
+              }
+              maskAlpha = headAlpha;
+            }
+          }
+
+          if (maskAlpha <= 0.01) {
+            dst[idx + 3] = 0;
+            continue;
+          }
+
+          // --- (B) 本人そっくりデジタルアバター質感（エッジ保持バイラテラル平滑化＋繊細な線画強調） ---
+          const r0 = src[idx];
+          const g0 = src[idx + 1];
+          const b0 = src[idx + 2];
+
+          let sumR = r0 * 4;
+          let sumG = g0 * 4;
+          let sumB = b0 * 4;
+          let totalW = 4;
+
+          // 近傍サンプリングで写真のノイズを消しつつ、目・眉・メガネ・髪の境界はくっきり残す
+          if (x > 2 && x < size - 3 && y > 2 && y < size - 3) {
+            const offsets = [
+              [-2, 0], [2, 0], [0, -2], [0, 2],
+              [-2, -2], [2, -2], [-2, 2], [2, 2],
+            ];
+            for (let k = 0; k < offsets.length; k++) {
+              const nx = x + offsets[k][0];
+              const ny = y + offsets[k][1];
+              const nIdx = (ny * size + nx) * 4;
+              const nr = src[nIdx];
+              const ng = src[nIdx + 1];
+              const nb = src[nIdx + 2];
+              const cDiff = Math.abs(nr - r0) + Math.abs(ng - g0) + Math.abs(nb - b0);
+              if (cDiff < 64) {
+                const w = (68 - cDiff) * 0.04;
+                sumR += nr * w;
+                sumG += ng * w;
+                sumB += nb * w;
+                totalW += w;
+              }
+            }
+          }
+
+          let outR = sumR / totalW;
+          let outG = sumG / totalW;
+          let outB = sumB / totalW;
+
+          // ソフト・セルシェーディング（段階を滑らかに整えてイラスト／CGアバターの質感に）
+          const quantStep = 10;
+          const qR = Math.round(outR / quantStep) * quantStep;
+          const qG = Math.round(outG / quantStep) * quantStep;
+          const qB = Math.round(outB / quantStep) * quantStep;
+          outR = outR * 0.72 + qR * 0.28;
+          outG = outG * 0.72 + qG * 0.28;
+          outB = outB * 0.72 + qB * 0.28;
+
+          // 本人の目・眉・鼻・口・輪郭のエッジを抽出して繊細なイラスト線画として重ねる
+          if (x > 1 && x < size - 2 && y > 1 && y < size - 2) {
+            const idxL = (y * size + (x - 1)) * 4;
+            const idxR = (y * size + (x + 1)) * 4;
+            const idxU = ((y - 1) * size + x) * 4;
+            const idxD = ((y + 1) * size + x) * 4;
+            const lumL = src[idxL] * 0.3 + src[idxL + 1] * 0.59 + src[idxL + 2] * 0.11;
+            const lumR = src[idxR] * 0.3 + src[idxR + 1] * 0.59 + src[idxR + 2] * 0.11;
+            const lumU = src[idxU] * 0.3 + src[idxU + 1] * 0.59 + src[idxU + 2] * 0.11;
+            const lumD = src[idxD] * 0.3 + src[idxD + 1] * 0.59 + src[idxD + 2] * 0.11;
+            const grad = Math.hypot(lumR - lumL, lumD - lumU);
+            if (grad > 22) {
+              const edgeDarken = Math.max(0.62, 1 - (grad - 22) * 0.0042);
+              outR *= edgeDarken;
+              outG *= edgeDarken;
+              outB *= edgeDarken;
+            }
+          }
+
+          dst[idx] = Math.min(255, Math.max(0, Math.round(outR * 1.03)));
+          dst[idx + 1] = Math.min(255, Math.max(0, Math.round(outG * 1.02)));
+          dst[idx + 2] = Math.min(255, Math.max(0, Math.round(outB * 1.02)));
+          dst[idx + 3] = Math.min(255, Math.max(0, Math.round(maskAlpha * 255)));
         }
       }
       ctx.putImageData(imgData, 0, 0);
-    } catch (_) {}
-
-    // 4. 顔全体のソフトアニメライティング（鼻筋のハイライトと頬の透明感）
-    ctx.save();
-    const noseBridgeX = A.noseBridge.x * size;
-    const noseBridgeY = A.noseBridge.y * size;
-    const noseTipX = A.noseTip.x * size;
-    const noseTipY = A.noseTip.y * size;
-
-    // 鼻筋〜鼻先のアニメ調ハイライト
-    ctx.strokeStyle = "rgba(255, 252, 250, 0.36)";
-    ctx.lineWidth = 3.2;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(noseBridgeX, noseBridgeY + 4);
-    ctx.lineTo(noseTipX, noseTipY - 4);
-    ctx.stroke();
-
-    ctx.fillStyle = "rgba(255, 252, 250, 0.45)";
-    ctx.beginPath();
-    ctx.arc(noseTipX, noseTipY - 1, 3.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    } catch (e) {
+      console.warn("Alter Ego アバター生成フィルタ処理スキップ:", e);
+    }
 
     canvas._vtuberPalette = {
       skin: skinPalette,
-      hair: hairPalette,
-      lip: lipRgb,
     };
 
     return canvas;
   }
 
+  /**
+   * 初期デモ用の「首から上だけ」のポートレートを生成（写真登録前の初期表示用）
+   */
   function createDemoAvatarCanvas() {
     const c = document.createElement("canvas");
     c.width = 640;
     c.height = 640;
     const ctx = c.getContext("2d");
 
-    // 背景グラデーション
-    const bg = ctx.createRadialGradient(320, 260, 40, 320, 320, 420);
-    bg.addColorStop(0, "#242b48");
-    bg.addColorStop(1, "#0d1021");
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, 640, 640);
+    // 透過ベースに首から上だけを描画
+    ctx.clearRect(0, 0, 640, 640);
 
-    // 肩・ジャケット
-    const suitGrad = ctx.createLinearGradient(160, 480, 480, 640);
-    suitGrad.addColorStop(0, "#1e243b");
-    suitGrad.addColorStop(1, "#121626");
-    ctx.fillStyle = suitGrad;
+    // 首上部（下端は自然にフェード）
+    const neckGrad = ctx.createLinearGradient(320, 415, 320, 525);
+    neckGrad.addColorStop(0, "rgba(218, 170, 142, 1)");
+    neckGrad.addColorStop(0.65, "rgba(196, 145, 118, 0.85)");
+    neckGrad.addColorStop(1, "rgba(196, 145, 118, 0)");
+    ctx.fillStyle = neckGrad;
     ctx.beginPath();
-    ctx.moveTo(100, 640);
-    ctx.quadraticCurveTo(140, 500, 250, 485);
-    ctx.lineTo(390, 485);
-    ctx.quadraticCurveTo(500, 500, 540, 640);
+    ctx.moveTo(274, 420);
+    ctx.lineTo(366, 420);
+    ctx.lineTo(376, 520);
+    ctx.lineTo(264, 520);
     ctx.closePath();
     ctx.fill();
 
-    // 首
-    const neckGrad = ctx.createLinearGradient(270, 410, 370, 520);
-    neckGrad.addColorStop(0, "#e2b296");
-    neckGrad.addColorStop(1, "#c48f73");
-    ctx.fillStyle = neckGrad;
-    ctx.fillRect(268, 420, 104, 95);
-
     // 後ろ髪
-    ctx.fillStyle = "#181822";
+    ctx.fillStyle = "#181924";
     ctx.beginPath();
-    ctx.ellipse(320, 250, 155, 175, 0, 0, Math.PI * 2);
+    ctx.ellipse(320, 250, 152, 168, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // 耳
@@ -942,22 +1023,9 @@
     ctx.closePath();
     ctx.fill();
 
-    // 頬の自然な血色
-    const cheekL = ctx.createRadialGradient(238, 330, 5, 238, 330, 48);
-    cheekL.addColorStop(0, "rgba(235, 125, 115, 0.24)");
-    cheekL.addColorStop(1, "rgba(235, 125, 115, 0)");
-    ctx.fillStyle = cheekL;
-    ctx.fillRect(185, 280, 110, 100);
-
-    const cheekR = ctx.createRadialGradient(402, 330, 5, 402, 330, 48);
-    cheekR.addColorStop(0, "rgba(235, 125, 115, 0.24)");
-    cheekR.addColorStop(1, "rgba(235, 125, 115, 0)");
-    ctx.fillStyle = cheekR;
-    ctx.fillRect(345, 280, 110, 100);
-
     // 眉
     ctx.strokeStyle = "#2b2422";
-    ctx.lineWidth = 8;
+    ctx.lineWidth = 7.5;
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(212, 222);
@@ -966,7 +1034,7 @@
     ctx.quadraticCurveTo(392, 204, 428, 222);
     ctx.stroke();
 
-    // 目（白目・虹彩・瞳孔・ハイライト）
+    // 目
     const drawRealisticEye = (cx, cy) => {
       ctx.save();
       ctx.beginPath();
@@ -978,7 +1046,6 @@
       ctx.fill();
       ctx.clip();
 
-      // 虹彩
       const irisGrad = ctx.createRadialGradient(cx, cy, 3, cx, cy, 15);
       irisGrad.addColorStop(0, "#120e0c");
       irisGrad.addColorStop(0.5, "#3b271c");
@@ -989,24 +1056,17 @@
       ctx.arc(cx, cy - 1, 14, 0, Math.PI * 2);
       ctx.fill();
 
-      // 瞳孔
       ctx.fillStyle = "#08080a";
       ctx.beginPath();
       ctx.arc(cx, cy - 1, 6, 0, Math.PI * 2);
       ctx.fill();
 
-      // キャッチライト
-      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.beginPath();
-      ctx.arc(cx - 4, cy - 5, 3.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.55)";
-      ctx.beginPath();
-      ctx.arc(cx + 5, cy + 3, 1.8, 0, Math.PI * 2);
+      ctx.arc(cx - 4, cy - 5, 3.0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
-      // 上まぶたライン
       ctx.strokeStyle = "#2a1d19";
       ctx.lineWidth = 3.5;
       ctx.beginPath();
@@ -1031,13 +1091,7 @@
     ctx.ellipse(320, 316, 7, 16, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = "rgba(145, 92, 70, 0.45)";
-    ctx.beginPath();
-    ctx.ellipse(307, 330, 6, 3.5, 0.2, 0, Math.PI * 2);
-    ctx.ellipse(333, 330, 6, 3.5, -0.2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 唇（上唇・下唇・口角）
+    // 唇
     ctx.fillStyle = "#cf7b75";
     ctx.beginPath();
     ctx.moveTo(264, 394);
@@ -1059,7 +1113,6 @@
     ctx.quadraticCurveTo(288, 415, 264, 394);
     ctx.fill();
 
-    // 口の合わせ目ライン
     ctx.strokeStyle = "#8a423e";
     ctx.lineWidth = 2.2;
     ctx.beginPath();
@@ -1532,8 +1585,11 @@
       const mouthWide = s.mouthSpread * faceW * 0.065 + s.smileWeight * faceW * 0.035;
       const smileLift = (s.smileWeight + Math.max(0, s.mouthSpread) * 0.5) * faceH * 0.028;
 
+      const isAlterEgo = cfg.avatarStyle === "vtuber";
+      const floatY = isAlterEgo ? -Math.sin(s.breath * Math.PI) * 0.012 : 0;
+
       for (const v of this.mesh.vertices) {
-        if (v.role === "bg") {
+        if (v.role === "bg" && !isAlterEgo) {
           v.x = v.u * width;
           v.y = v.v * height;
           continue;
@@ -1617,9 +1673,12 @@
         const rotY = relX * sinR + relY * cosR;
 
         // Z値が大きい部位（鼻先・唇・眉間）ほど首を振ったときに大きく立体移動する
-        const depthFactor = (v.z + 0.25) * v.weight;
-        const perspectiveX = yaw * depthFactor * (1 - Math.abs(relX) * 0.4);
-        const perspectiveY = pitch * depthFactor * (1 - Math.abs(relY) * 0.4);
+        // アルターエゴ（首から上だけ）モードでは頭部全体が一体となって空間をスイングし、生写真のような引き攣れを防ぐ
+        const effectiveWeight = isAlterEgo ? Math.max(0.72, v.weight) : v.weight;
+        const effectiveZ = isAlterEgo && v.role === "bg" ? 0.05 : v.z;
+        const depthFactor = (effectiveZ + 0.25) * effectiveWeight;
+        const perspectiveX = yaw * depthFactor * (1 - Math.abs(relX) * 0.35);
+        const perspectiveY = pitch * depthFactor * (1 - Math.abs(relY) * 0.35) + floatY;
 
         v.x = (cx + rotX + perspectiveX) * width;
         v.y = (cy + rotY + perspectiveY) * height;
@@ -1911,329 +1970,88 @@
      * - 顔部分は写真から生成・美肌調和した「本人の顔」を Vtuber 輪郭に綺麗に切り抜いて融合し、
      *   まばたき・瞳の輝き・視線追従・リップシンク・首の揺れで違和感なく自然に動かす
      */
+    /**
+     * 「ダンガンロンパのアルターエゴ」風・首から上だけで写真の人そっくりに動くデジタルアバター描画
+     * - 余計なアニメ衣装やキャラパーツは一切描かず、写真から生成した「本人の首から上」だけをモニター空間に浮遊表示
+     * - 頭部全体が一体となって自然にうなずき・傾き、本人の目・眉・口が滑らかに表情変化＆リップシンクする
+     */
     _renderVtuberAvatar(ctx, stageSize) {
       const S = stageSize;
       const s = this.state;
       const cfg = this.settings;
       const A = enrichAnchors(this.anchors);
       const V = this.mesh.vertices;
-      const C = this.mesh.contourRing;
 
       if (!this.images.vtuber && this.images.base) {
         this.images.vtuber = generateVtuberAvatar(this.images.base, A);
       }
-      const vtuberFaceImg = this.images.vtuber || this.images.base;
-      const imgW = vtuberFaceImg.width || 720;
-      const imgH = vtuberFaceImg.height || 720;
+      const avatarImg = this.images.vtuber || this.images.base;
+      const imgW = avatarImg.width || 720;
+      const imgH = avatarImg.height || 720;
 
-      const palette = vtuberFaceImg._vtuberPalette || {
-        skin: clampSkinPalette({ r: 240, g: 198, b: 176 }),
-        hair: clampHairPalette({ r: 30, g: 30, b: 44 }),
-        lip: { r: 210, g: 115, b: 115 },
+      const palette = avatarImg._vtuberPalette || {
+        skin: clampSkinPalette({ r: 235, g: 195, b: 175 }),
       };
 
+      const holoIntensity = cfg.vtuberCheek !== undefined ? cfg.vtuberCheek : 1.0;
       const now = performance.now();
 
       // =========================================================
-      // 1. Vtuber 配信スタジオ背景（生写真の背景を切り離し、アバター空間を構築）
+      // 1. アルターエゴ風 デジタルモニター背景（サイバーターミナル空間）
       // =========================================================
-      const bgGrad = ctx.createRadialGradient(S * 0.5, S * 0.38, S * 0.05, S * 0.5, S * 0.5, S * 0.72);
-      bgGrad.addColorStop(0, "#1e2444");
-      bgGrad.addColorStop(0.55, "#11152b");
-      bgGrad.addColorStop(1, "#080a16");
+      const bgGrad = ctx.createRadialGradient(S * 0.5, S * 0.44, S * 0.04, S * 0.5, S * 0.5, S * 0.72);
+      bgGrad.addColorStop(0, "#0f2438");
+      bgGrad.addColorStop(0.55, "#071320");
+      bgGrad.addColorStop(1, "#03070e");
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, S, S);
 
-      // 背後のソフトネオンオーラ（発話中に優しく脈動）
-      const auraPulse = 1 + (s.mode === "speaking" ? s.mouthOpen * 0.18 : Math.sin(now * 0.002) * 0.05);
-      const auraGrad = ctx.createRadialGradient(
-        S * 0.5,
-        S * 0.42,
-        S * 0.04,
-        S * 0.5,
-        S * 0.42,
-        S * 0.42 * auraPulse
-      );
-      auraGrad.addColorStop(0, "rgba(99, 102, 241, 0.28)");
-      auraGrad.addColorStop(0.5, "rgba(56, 189, 248, 0.12)");
-      auraGrad.addColorStop(1, "rgba(56, 189, 248, 0)");
-      ctx.fillStyle = auraGrad;
-      ctx.fillRect(0, 0, S, S);
-
-      // ステージの浮遊パーティクル
-      ctx.save();
-      for (let i = 0; i < 8; i++) {
-        const px = S * (0.12 + ((i * 0.11 + Math.sin(now * 0.0004 + i) * 0.03) % 0.78));
-        const py = S * (0.15 + ((i * 0.13 + Math.cos(now * 0.0005 + i * 1.7) * 0.04) % 0.72));
-        const pr = S * (0.003 + (i % 3) * 0.0018);
-        ctx.fillStyle = i % 2 === 0 ? "rgba(125, 211, 252, 0.28)" : "rgba(196, 181, 253, 0.24)";
-        ctx.beginPath();
-        ctx.arc(px, py, pr, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-
-      // 顔の基準メトリクス（変形後の顎・頬・額）
-      const chinPt = V[C.chinC];
-      const jawLPt = V[C.jawL];
-      const jawRPt = V[C.jawR];
-      const cheekLPt = V[C.cheekOuterL];
-      const cheekRPt = V[C.cheekOuterR];
-      const foreheadPt = V[C.foreheadC];
-      const hTopPt = V[C.hTop];
-
-      const faceW = Math.max(S * 0.24, cheekRPt.x - cheekLPt.x);
-      const faceH = Math.max(S * 0.28, chinPt.y - foreheadPt.y);
-      const headCx = (cheekLPt.x + cheekRPt.x) * 0.5;
-      const headCy = (foreheadPt.y + chinPt.y) * 0.5;
-
-      // 呼吸・身体の揺れオフセット
-      const breathY = -s.breath * S * 0.008;
-      const bodySwayX = s.headYaw * S * 0.018 * cfg.headMotionScale;
-      const bodyRoll = s.headRoll * 0.022 * cfg.headMotionScale;
-      const neckBaseX = A.chin.x * S + bodySwayX;
-      const neckTopY = A.chin.y * S - faceH * 0.08 + breathY;
-      const shoulderY = Math.min(S * 0.88, A.chin.y * S + faceH * 0.28) + breathY;
-
-      // =========================================================
-      // 2. Vtuber 後ろ髪（首・肩の背後に配置し、揺れに追従）
-      // =========================================================
-      ctx.save();
-      const hairSwayX = s.headYaw * S * 0.028;
-      const backHairGrad = ctx.createLinearGradient(headCx, hTopPt.y, headCx, shoulderY + faceH * 0.25);
-      backHairGrad.addColorStop(0, palette.hair.baseHex);
-      backHairGrad.addColorStop(1, palette.hair.darkHex);
-      ctx.fillStyle = backHairGrad;
-      ctx.beginPath();
-      ctx.ellipse(
-        headCx - hairSwayX * 0.35,
-        headCy + faceH * 0.05,
-        faceW * 0.64,
-        faceH * 0.72,
-        s.headRoll * 0.03,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-      ctx.restore();
-
-      // =========================================================
-      // 3. Vtuber の首＆上半身・配信者衣装（Live2D イラストボディ）
-      // =========================================================
-      ctx.save();
-      ctx.translate(neckBaseX, shoulderY);
-      ctx.rotate(bodyRoll);
-      ctx.translate(-neckBaseX, -shoulderY);
-
-      const neckW = Math.max(S * 0.11, faceW * 0.34);
-      const neckH = Math.max(S * 0.10, shoulderY - neckTopY + S * 0.04);
-
-      // 3a. 首（写真から抽出した本人の肌色に完全一致）
-      const neckGrad = ctx.createLinearGradient(neckBaseX - neckW * 0.5, neckTopY, neckBaseX + neckW * 0.5, neckTopY + neckH);
-      neckGrad.addColorStop(0, palette.skin.shadowHex);
-      neckGrad.addColorStop(0.35, palette.skin.baseHex);
-      neckGrad.addColorStop(1, palette.skin.shadowHex);
-      ctx.fillStyle = neckGrad;
-      ctx.beginPath();
-      ctx.moveTo(neckBaseX - neckW * 0.46, neckTopY);
-      ctx.quadraticCurveTo(neckBaseX - neckW * 0.44, neckTopY + neckH * 0.55, neckBaseX - neckW * 0.62, neckTopY + neckH);
-      ctx.lineTo(neckBaseX + neckW * 0.62, neckTopY + neckH);
-      ctx.quadraticCurveTo(neckBaseX + neckW * 0.44, neckTopY + neckH * 0.55, neckBaseX + neckW * 0.46, neckTopY);
-      ctx.closePath();
-      ctx.fill();
-
-      // 顎下のアニメセル影（顔と首の立体的な境界を作る）
-      const chinDropShadow = ctx.createRadialGradient(
-        chinPt.x,
-        chinPt.y + faceH * 0.02,
-        neckW * 0.08,
-        chinPt.x,
-        chinPt.y + faceH * 0.05,
-        neckW * 0.62
-      );
-      chinDropShadow.addColorStop(0, "rgba(58, 32, 42, 0.52)");
-      chinDropShadow.addColorStop(0.65, "rgba(58, 32, 42, 0.22)");
-      chinDropShadow.addColorStop(1, "rgba(58, 32, 42, 0)");
-      ctx.fillStyle = chinDropShadow;
-      ctx.beginPath();
-      ctx.ellipse(chinPt.x, chinPt.y + faceH * 0.04, neckW * 0.52, faceH * 0.11, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 首の輪郭線と鎖骨ハイライト
-      ctx.strokeStyle = "rgba(52, 32, 38, 0.55)";
-      ctx.lineWidth = Math.max(1.8, S * 0.003);
-      ctx.beginPath();
-      ctx.moveTo(neckBaseX - neckW * 0.45, neckTopY + neckH * 0.1);
-      ctx.quadraticCurveTo(neckBaseX - neckW * 0.44, neckTopY + neckH * 0.55, neckBaseX - neckW * 0.58, neckTopY + neckH * 0.92);
-      ctx.moveTo(neckBaseX + neckW * 0.45, neckTopY + neckH * 0.1);
-      ctx.quadraticCurveTo(neckBaseX + neckW * 0.44, neckTopY + neckH * 0.55, neckBaseX + neckW * 0.58, neckTopY + neckH * 0.92);
-      ctx.stroke();
-
-      // 3b. Vtuber 衣装（スタイリッシュなレイヤードジャケット＆インナー）
-      const torsoTopY = neckTopY + neckH * 0.68;
-      const shoulderSpan = Math.max(S * 0.66, faceW * 1.75);
-      const bottomY = S + 20;
-
-      // インナーシャツ
-      const innerGrad = ctx.createLinearGradient(neckBaseX, torsoTopY, neckBaseX, bottomY);
-      innerGrad.addColorStop(0, "#f8fafc");
-      innerGrad.addColorStop(1, "#cbd5e1");
-      ctx.fillStyle = innerGrad;
-      ctx.beginPath();
-      ctx.moveTo(neckBaseX - neckW * 0.72, torsoTopY);
-      ctx.quadraticCurveTo(neckBaseX, torsoTopY + neckH * 0.38, neckBaseX + neckW * 0.72, torsoTopY);
-      ctx.lineTo(neckBaseX + neckW * 0.95, bottomY);
-      ctx.lineTo(neckBaseX - neckW * 0.95, bottomY);
-      ctx.closePath();
-      ctx.fill();
-
-      // メインジャケット（アウター）
-      const jacketGrad = ctx.createLinearGradient(neckBaseX - shoulderSpan * 0.5, torsoTopY, neckBaseX + shoulderSpan * 0.5, bottomY);
-      jacketGrad.addColorStop(0, "#1e293b");
-      jacketGrad.addColorStop(0.5, "#0f172a");
-      jacketGrad.addColorStop(1, "#1e1b4b");
-      ctx.fillStyle = jacketGrad;
-
-      ctx.beginPath();
-      ctx.moveTo(neckBaseX - neckW * 0.62, torsoTopY - S * 0.01);
-      ctx.quadraticCurveTo(
-        neckBaseX - shoulderSpan * 0.42,
-        torsoTopY + S * 0.02,
-        neckBaseX - shoulderSpan * 0.54,
-        bottomY
-      );
-      ctx.lineTo(neckBaseX + shoulderSpan * 0.54, bottomY);
-      ctx.quadraticCurveTo(
-        neckBaseX + shoulderSpan * 0.42,
-        torsoTopY + S * 0.02,
-        neckBaseX + neckW * 0.62,
-        torsoTopY - S * 0.01
-      );
-      // Vネックの切り込み
-      ctx.lineTo(neckBaseX + neckW * 0.28, bottomY);
-      ctx.lineTo(neckBaseX - neckW * 0.28, bottomY);
-      ctx.closePath();
-      ctx.fill();
-
-      // ジャケットの襟（ラペル）とサイバーアクセントライン
-      ctx.strokeStyle = "#38bdf8";
-      ctx.lineWidth = Math.max(2.2, S * 0.004);
-      ctx.beginPath();
-      ctx.moveTo(neckBaseX - neckW * 0.62, torsoTopY - S * 0.005);
-      ctx.lineTo(neckBaseX - neckW * 0.26, bottomY);
-      ctx.moveTo(neckBaseX + neckW * 0.62, torsoTopY - S * 0.005);
-      ctx.lineTo(neckBaseX + neckW * 0.26, bottomY);
-      ctx.stroke();
-
-      // ネクタイ / リボンエンブレム
-      const tieGrad = ctx.createLinearGradient(neckBaseX, torsoTopY + S * 0.03, neckBaseX, bottomY);
-      tieGrad.addColorStop(0, "#6366f1");
-      tieGrad.addColorStop(1, "#0ea5e9");
-      ctx.fillStyle = tieGrad;
-      ctx.beginPath();
-      ctx.moveTo(neckBaseX, torsoTopY + S * 0.025);
-      ctx.lineTo(neckBaseX + neckW * 0.16, torsoTopY + S * 0.065);
-      ctx.lineTo(neckBaseX + neckW * 0.11, bottomY);
-      ctx.lineTo(neckBaseX - neckW * 0.11, bottomY);
-      ctx.lineTo(neckBaseX - neckW * 0.16, torsoTopY + S * 0.065);
-      ctx.closePath();
-      ctx.fill();
-
-      // 肩・ジャケットのアニメ線画
-      ctx.strokeStyle = "#090d16";
-      ctx.lineWidth = Math.max(2.4, S * 0.0042);
-      ctx.beginPath();
-      ctx.moveTo(neckBaseX - neckW * 0.62, torsoTopY - S * 0.01);
-      ctx.quadraticCurveTo(
-        neckBaseX - shoulderSpan * 0.42,
-        torsoTopY + S * 0.02,
-        neckBaseX - shoulderSpan * 0.54,
-        bottomY
-      );
-      ctx.moveTo(neckBaseX + neckW * 0.62, torsoTopY - S * 0.01);
-      ctx.quadraticCurveTo(
-        neckBaseX + shoulderSpan * 0.42,
-        torsoTopY + S * 0.02,
-        neckBaseX + shoulderSpan * 0.54,
-        bottomY
-      );
-      ctx.stroke();
-
-      ctx.restore(); // 上半身終了
-
-      // =========================================================
-      // 4. 両耳（本人の肌トーンで顔の左右に配置）
-      // =========================================================
-      const earW = faceW * 0.075;
-      const earH = faceH * 0.135;
-      const earY = (cheekLPt.y + cheekRPt.y) * 0.5 - faceH * 0.02;
-
-      for (const isLeft of [true, false]) {
-        const earX = isLeft ? cheekLPt.x - earW * 0.35 : cheekRPt.x + earW * 0.35;
+      // デジタルグリッド＆音声連動パルスリング（アルターエゴの画面演出）
+      if (holoIntensity > 0.05) {
         ctx.save();
-        ctx.fillStyle = palette.skin.baseHex;
-        ctx.strokeStyle = "rgba(55, 34, 40, 0.55)";
-        ctx.lineWidth = Math.max(1.8, S * 0.003);
-        ctx.beginPath();
-        ctx.ellipse(earX, earY, earW, earH, isLeft ? -0.14 : 0.14, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+        const gridAlpha = Math.min(0.25, 0.08 * holoIntensity);
+        ctx.strokeStyle = `rgba(56, 189, 248, ${gridAlpha})`;
+        ctx.lineWidth = 1;
+        const step = S / 12;
+        for (let i = 1; i < 12; i++) {
+          ctx.beginPath();
+          ctx.moveTo(0, i * step);
+          ctx.lineTo(S, i * step);
+          ctx.moveTo(i * step, 0);
+          ctx.lineTo(i * step, S);
+          ctx.stroke();
+        }
 
-        // 耳の中の陰影
-        ctx.fillStyle = palette.skin.shadowHex;
-        ctx.beginPath();
-        ctx.ellipse(earX + (isLeft ? 2 : -2), earY + 1, earW * 0.5, earH * 0.55, isLeft ? -0.1 : 0.1, 0, Math.PI * 2);
-        ctx.fill();
+        // 発話時に首から上の背後に広がるデジタル音響リング
+        const headCx = S * (A.faceCenter.x + s.headYaw * 0.025);
+        const headCy = S * (A.faceCenter.y + s.headPitch * 0.02);
+        const voiceBoost = s.mode === "speaking" ? s.mouthOpen * 0.25 : 0;
+        const glowR = S * (0.34 + Math.sin(now * 0.0025) * 0.015 + voiceBoost);
+
+        const holoGlow = ctx.createRadialGradient(headCx, headCy, S * 0.08, headCx, headCy, glowR);
+        holoGlow.addColorStop(0, `rgba(34, 211, 238, ${Math.min(0.38, (0.16 + voiceBoost) * holoIntensity)})`);
+        holoGlow.addColorStop(0.6, `rgba(16, 185, 129, ${Math.min(0.18, 0.07 * holoIntensity)})`);
+        holoGlow.addColorStop(1, "rgba(16, 185, 129, 0)");
+        ctx.fillStyle = holoGlow;
+        ctx.fillRect(0, 0, S, S);
         ctx.restore();
       }
 
       // =========================================================
-      // 5. 写真から生成した「本人の顔 2.5D メッシュ」を Vtuber 頭部シルエットに切り抜いて描画
+      // 2. 口内の描画（唇メッシュの背面に配置：歯・舌・口内陰影）
       // =========================================================
-      const hTopLPt = V[C.hTopL];
-      const hTopRPt = V[C.hTopR];
-      const hMidLPt = V[C.hMidL];
-      const hMidRPt = V[C.hMidR];
-      const chinLPt = V[C.chinL];
-      const chinRPt = V[C.chinR];
-
-      // 頭部〜顎ラインの滑らかなベジェクリッピングパス（写真の背景や四角い枠を完全に除去）
-      const traceHeadSilhouette = () => {
-        ctx.beginPath();
-        ctx.moveTo(hTopPt.x, hTopPt.y - faceH * 0.04);
-        // 左側頭頂〜こめかみ
-        ctx.quadraticCurveTo(hTopLPt.x - faceW * 0.08, hTopLPt.y, hMidLPt.x - faceW * 0.02, hMidLPt.y);
-        // 左頬〜左エラ
-        ctx.quadraticCurveTo(cheekLPt.x - faceW * 0.01, (cheekLPt.y + jawLPt.y) * 0.5, jawLPt.x, jawLPt.y);
-        // 左エラ〜顎先（シャープで美しいVtuberフェイスライン）
-        ctx.quadraticCurveTo(chinLPt.x, chinLPt.y + faceH * 0.015, chinPt.x, chinPt.y + faceH * 0.01);
-        // 顎先〜右エラ
-        ctx.quadraticCurveTo(chinRPt.x, chinRPt.y + faceH * 0.015, jawRPt.x, jawRPt.y);
-        // 右エラ〜右頬
-        ctx.quadraticCurveTo(cheekRPt.x + faceW * 0.01, (cheekRPt.y + jawRPt.y) * 0.5, hMidRPt.x + faceW * 0.02, hMidRPt.y);
-        // 右こめかみ〜頭頂
-        ctx.quadraticCurveTo(hTopRPt.x + faceW * 0.08, hTopRPt.y, hTopPt.x, hTopPt.y - faceH * 0.04);
-        ctx.closePath();
-      };
-
-      ctx.save();
-      traceHeadSilhouette();
-      ctx.clip();
-
-      // 5a. 口が開いたときの口内（歯・舌・口内陰影）を描画
       this._renderMouthCavity(ctx, S, S);
 
-      // 5b. 本人の顔メッシュ（背景と肩の三角形を除外し、頭部・顔のみワープ描画）
+      // =========================================================
+      // 3. 写真から生成した「首から上だけ・本人そっくりアバター」の 2.5D メッシュ描画
+      // =========================================================
       for (const [i0, i1, i2] of this.mesh.triangles) {
         const v0 = V[i0];
         const v1 = V[i1];
         const v2 = V[i2];
-        if (v0.role === "bg" || v1.role === "bg" || v2.role === "bg") continue;
-        if (v0.role === "shoulder" && v1.role === "shoulder" && v2.role === "shoulder") continue;
-
         drawTexturedTriangle(
           ctx,
-          vtuberFaceImg,
+          avatarImg,
           v0.u * imgW,
           v0.v * imgH,
           v1.u * imgW,
@@ -2249,7 +2067,7 @@
         );
       }
 
-      // 5c. 笑顔写真 (smile) が登録されている場合のマルチ写真ブレンド
+      // 笑顔写真 (smile) が登録されている場合の自然な表情ブレンド
       if (this.images.smile && s.smileWeight > 0.18) {
         const alpha = Math.min(0.65, (s.smileWeight - 0.18) * 1.4);
         ctx.save();
@@ -2261,7 +2079,7 @@
           const v0 = V[i0];
           const v1 = V[i1];
           const v2 = V[i2];
-          if (v0.role === "bg" || v1.role === "bg" || v2.role === "bg") continue;
+          if (v0.role === "bg") continue;
           drawTexturedTriangle(
             ctx,
             sImg,
@@ -2282,106 +2100,32 @@
         ctx.restore();
       }
 
-      // 5d. フェイスライン内側のソフトシェーディング（写真の切り抜き境界を馴染ませる）
-      const edgeGrad = ctx.createRadialGradient(
-        headCx,
-        headCy,
-        faceW * 0.32,
-        headCx,
-        headCy,
-        faceW * 0.62
-      );
-      edgeGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
-      edgeGrad.addColorStop(0.78, "rgba(0, 0, 0, 0)");
-      edgeGrad.addColorStop(1, "rgba(40, 22, 30, 0.22)");
-      ctx.fillStyle = edgeGrad;
-      ctx.fillRect(0, 0, S, S);
-
-      ctx.restore(); // 頭部クリッピング終了
-
       // =========================================================
-      // 6. Vtuber 輪郭線＆サイドヘア毛束・頭頂ハイライト（本人の顔とVtuber頭部を完全一体化）
+      // 4. 自然なまばたき補完＆瞳の微細なキャッチライト・口元の引き締め
       // =========================================================
-      ctx.save();
-
-      // 6a. 顎〜頬のシャープなアニメ輪郭線
-      ctx.strokeStyle = "rgba(48, 28, 36, 0.72)";
-      ctx.lineWidth = Math.max(2.2, S * 0.0038);
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(cheekLPt.x - faceW * 0.005, cheekLPt.y);
-      ctx.quadraticCurveTo(cheekLPt.x, (cheekLPt.y + jawLPt.y) * 0.5, jawLPt.x, jawLPt.y);
-      ctx.quadraticCurveTo(chinLPt.x, chinLPt.y + faceH * 0.015, chinPt.x, chinPt.y + faceH * 0.01);
-      ctx.quadraticCurveTo(chinRPt.x, chinRPt.y + faceH * 0.015, jawRPt.x, jawRPt.y);
-      ctx.quadraticCurveTo(cheekRPt.x, (cheekRPt.y + jawRPt.y) * 0.5, cheekRPt.x + faceW * 0.005, cheekRPt.y);
-      ctx.stroke();
-
-      // 6b. サイドヘア（もみあげ・顔横の揺れる毛束で切り抜き境界を自然にカバー）
-      const sideHairGrad = ctx.createLinearGradient(headCx, hTopPt.y, headCx, jawLPt.y + faceH * 0.15);
-      sideHairGrad.addColorStop(0, palette.hair.baseHex);
-      sideHairGrad.addColorStop(1, palette.hair.darkHex);
-      ctx.fillStyle = sideHairGrad;
-      ctx.strokeStyle = "rgba(20, 16, 28, 0.65)";
-      ctx.lineWidth = Math.max(1.6, S * 0.0028);
-
-      // 左サイド毛束
-      ctx.beginPath();
-      ctx.moveTo(hTopLPt.x - faceW * 0.03, hTopLPt.y + faceH * 0.02);
-      ctx.quadraticCurveTo(
-        hMidLPt.x - faceW * 0.08,
-        cheekLPt.y,
-        jawLPt.x - faceW * 0.02 - hairSwayX * 0.25,
-        jawLPt.y + faceH * 0.12
-      );
-      ctx.quadraticCurveTo(
-        cheekLPt.x + faceW * 0.02,
-        cheekLPt.y + faceH * 0.02,
-        hMidLPt.x + faceW * 0.02,
-        hTopLPt.y + faceH * 0.12
-      );
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // 右サイド毛束
-      ctx.beginPath();
-      ctx.moveTo(hTopRPt.x + faceW * 0.03, hTopRPt.y + faceH * 0.02);
-      ctx.quadraticCurveTo(
-        hMidRPt.x + faceW * 0.08,
-        cheekRPt.y,
-        jawRPt.x + faceW * 0.02 - hairSwayX * 0.25,
-        jawRPt.y + faceH * 0.12
-      );
-      ctx.quadraticCurveTo(
-        cheekRPt.x - faceW * 0.02,
-        cheekRPt.y + faceH * 0.02,
-        hMidRPt.x - faceW * 0.02,
-        hTopRPt.y + faceH * 0.12
-      );
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // 6c. 頭頂部の天使の輪（アニメヘアハイライト）
-      const haloY = (hTopPt.y + foreheadPt.y) * 0.5;
-      const haloGrad = ctx.createLinearGradient(headCx - faceW * 0.3, haloY, headCx + faceW * 0.3, haloY);
-      haloGrad.addColorStop(0, "rgba(255, 255, 255, 0)");
-      haloGrad.addColorStop(0.5, "rgba(255, 255, 255, 0.26)");
-      haloGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
-      ctx.strokeStyle = haloGrad;
-      ctx.lineWidth = Math.max(4, faceH * 0.025);
-      ctx.beginPath();
-      ctx.arc(headCx, haloY + faceH * 0.18, faceW * 0.36, Math.PI * 1.18, Math.PI * 1.82);
-      ctx.stroke();
-
-      ctx.restore();
-
-      // =========================================================
-      // 7. Vtuber チーク・瞳ハイライト・まばたき・リップラインのリアルタイム描画
-      // =========================================================
-      this._renderVtuberCheeks(ctx, S, faceW);
       this._renderVtuberEyes(ctx, S, palette);
       this._renderVtuberMouth(ctx, S);
+
+      // =========================================================
+      // 5. アルターエゴ風 モニター走査線（スキャンライン）＆ビネット演出
+      // =========================================================
+      if (holoIntensity > 0.1) {
+        ctx.save();
+        const scanAlpha = Math.min(0.12, 0.045 * holoIntensity);
+        ctx.fillStyle = `rgba(125, 211, 252, ${scanAlpha})`;
+        for (let y = 0; y < S; y += 4) {
+          ctx.fillRect(0, y, S, 1);
+        }
+        ctx.restore();
+      }
+
+      // 画面四隅のソフトモニタービネット
+      const vig = ctx.createRadialGradient(S * 0.5, S * 0.48, S * 0.28, S * 0.5, S * 0.5, S * 0.68);
+      vig.addColorStop(0, "rgba(0, 0, 0, 0)");
+      vig.addColorStop(0.75, "rgba(0, 0, 0, 0)");
+      vig.addColorStop(1, "rgba(2, 6, 14, 0.52)");
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, S, S);
 
       // ワイヤーフレーム確認表示（ONのときのみ）
       if (cfg.showWireframe) {
@@ -2392,7 +2136,7 @@
           const v0 = V[i0];
           const v1 = V[i1];
           const v2 = V[i2];
-          if (v0.role === "bg" || v1.role === "bg" || v2.role === "bg") continue;
+          if (v0.role === "bg" && v1.role === "bg" && v2.role === "bg") continue;
           ctx.beginPath();
           ctx.moveTo(v0.x, v0.y);
           ctx.lineTo(v1.x, v1.y);
@@ -2405,57 +2149,15 @@
     }
 
     /**
-     * Vtuber チーク（頬の血色＆斜線ハイライト）
-     */
-    _renderVtuberCheeks(ctx, stageSize, faceW) {
-      const cheekScale = this.settings.vtuberCheek !== undefined ? this.settings.vtuberCheek : 1.0;
-      if (cheekScale <= 0.02) return;
-
-      const V = this.mesh.vertices;
-      const ch = this.mesh.cheekIndices;
-      if (!ch) return;
-
-      const ptL = V[ch.left];
-      const ptR = V[ch.right];
-      const radius = Math.max(12, faceW * 0.12);
-      const alpha = Math.min(0.65, (0.26 + this.state.smileWeight * 0.25) * cheekScale);
-
-      ctx.save();
-      for (const pt of [ptL, ptR]) {
-        const g = ctx.createRadialGradient(pt.x, pt.y, radius * 0.1, pt.x, pt.y, radius);
-        g.addColorStop(0, `rgba(255, 115, 145, ${alpha})`);
-        g.addColorStop(0.55, `rgba(255, 135, 160, ${alpha * 0.45})`);
-        g.addColorStop(1, "rgba(255, 150, 170, 0)");
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
-        ctx.fill();
-
-        // 可愛い斜線チークハイライト
-        if (cheekScale > 0.4) {
-          ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(0.65, alpha * 0.9)})`;
-          ctx.lineWidth = Math.max(1.5, stageSize * 0.0026);
-          ctx.lineCap = "round";
-          for (const dx of [-4, 3]) {
-            ctx.beginPath();
-            ctx.moveTo(pt.x + dx - 3, pt.y - 3);
-            ctx.lineTo(pt.x + dx + 3, pt.y + 4);
-            ctx.stroke();
-          }
-        }
-      }
-      ctx.restore();
-    }
-
-    /**
-     * Vtuber アイ（本人の目にきらめく瞳ハイライト・アイライン・滑らかなまばたきを付与）
+     * 本人の目元を活かした自然なまばたき＆瞳の微細キャッチライト
+     * （アニメ風の巨大な目やチークは描かず、写真の本人の目をそのまま自然に動かす）
      */
     _renderVtuberEyes(ctx, stageSize, palette) {
       const V = this.mesh.vertices;
       const rings = this.mesh.eyeRings;
       if (!rings) return;
 
-      const shineScale = this.settings.vtuberEyeShine !== undefined ? this.settings.vtuberEyeShine : 1.2;
+      const shineScale = this.settings.vtuberEyeShine !== undefined ? this.settings.vtuberEyeShine : 1.0;
       const s = this.state;
 
       const eyes = [
@@ -2471,68 +2173,53 @@
 
         const cx = (pOuter.x + pInner.x) * 0.5;
         const cy = (pTop.y + pBot.y) * 0.5;
-        const eyeW = Math.max(12, Math.hypot(pInner.x - pOuter.x, pInner.y - pOuter.y));
+        const eyeW = Math.max(10, Math.hypot(pInner.x - pOuter.x, pInner.y - pOuter.y));
         const openH = Math.max(0, pBot.y - pTop.y);
 
         ctx.save();
 
-        // まばたき時（目を閉じている最中）は肌色のまぶたシェイプで綺麗に閉じる
-        if (blink > 0.25) {
+        // まばたきで目を閉じた瞬間の自然なまぶたシェーディング＆閉じまつ毛ライン
+        if (blink > 0.35) {
+          const lidAlpha = Math.min(0.92, (blink - 0.35) / 0.55);
+          ctx.globalAlpha = lidAlpha;
           ctx.fillStyle = palette.skin.baseHex;
           ctx.beginPath();
-          ctx.ellipse(cx, cy, eyeW * 0.54, Math.max(3, eyeW * 0.22), 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        // 目が開いているときは、視線に追従するVtuberデュアルキャッチライト（瞳の輝き）を描画
-        if (blink < 0.65 && shineScale > 0.05) {
-          const gazeShiftX = s.lookX * eyeW * 0.08;
-          const gazeShiftY = s.lookY * eyeW * 0.05;
-          const rMain = Math.max(2.0, eyeW * 0.095 * Math.min(1.4, shineScale));
-          const rSub = Math.max(1.2, eyeW * 0.055 * Math.min(1.4, shineScale));
-
-          // メインハイライト（斜め上）
-          ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.96, 0.72 * shineScale)})`;
-          ctx.beginPath();
-          ctx.arc(
-            cx - eyeW * 0.1 + gazeShiftX,
-            cy - openH * 0.16 + gazeShiftY,
-            rMain,
-            0,
-            Math.PI * 2
-          );
+          ctx.ellipse(cx, cy, eyeW * 0.52, Math.max(2.5, eyeW * 0.16), 0, 0, Math.PI * 2);
           ctx.fill();
 
-          // サブハイライト（斜め下）
-          ctx.fillStyle = `rgba(235, 248, 255, ${Math.min(0.88, 0.58 * shineScale)})`;
+          ctx.strokeStyle = "rgba(35, 24, 22, 0.78)";
+          ctx.lineWidth = Math.max(1.6, eyeW * 0.06);
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          const leftPt = isLeft ? pOuter : pInner;
+          const rightPt = isLeft ? pInner : pOuter;
+          ctx.moveTo(leftPt.x, leftPt.y);
+          ctx.quadraticCurveTo(cx, pBot.y + 1.5, rightPt.x, rightPt.y);
+          ctx.stroke();
+        } else if (shineScale > 0.05) {
+          // 目が開いているときは、写真の本人の瞳の中に小さな自然キャッチライトだけを添えて視線追従感を出す
+          const gazeShiftX = s.lookX * eyeW * 0.06;
+          const gazeShiftY = s.lookY * eyeW * 0.04;
+          const rDot = Math.max(1.3, eyeW * 0.048 * Math.min(1.3, shineScale));
+
+          ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.85, 0.55 * shineScale)})`;
           ctx.beginPath();
           ctx.arc(
-            cx + eyeW * 0.11 + gazeShiftX * 0.6,
-            cy + openH * 0.14 + gazeShiftY * 0.6,
-            rSub,
+            cx - eyeW * 0.07 + gazeShiftX,
+            cy - openH * 0.15 + gazeShiftY,
+            rDot,
             0,
             Math.PI * 2
           );
           ctx.fill();
         }
-
-        // 上まつ毛・アイライン（まばたきに完全連動して上下する）
-        ctx.strokeStyle = "#1c1624";
-        ctx.lineWidth = Math.max(2.2, eyeW * 0.085);
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        const leftPt = isLeft ? pOuter : pInner;
-        const rightPt = isLeft ? pInner : pOuter;
-        ctx.moveTo(leftPt.x - (isLeft ? 2 : 0), leftPt.y);
-        ctx.quadraticCurveTo(pTop.x, pTop.y - openH * 0.22, rightPt.x + (isLeft ? 0 : 2), rightPt.y);
-        ctx.stroke();
 
         ctx.restore();
       }
     }
 
     /**
-     * Vtuber リップライン（発話・笑顔の口元をくっきり見せる）
+     * 口元の自然なリップライン補完
      */
     _renderVtuberMouth(ctx, stageSize) {
       const ring = this.mesh.mouthCavityRing;
@@ -2541,28 +2228,15 @@
       const pL = V[ring.left];
       const pUC = V[ring.upperC];
       const pR = V[ring.right];
-      const pLC = V[ring.lowerC];
 
       ctx.save();
-      ctx.strokeStyle = "rgba(85, 38, 46, 0.62)";
-      ctx.lineWidth = Math.max(1.6, stageSize * 0.0028);
+      ctx.strokeStyle = "rgba(70, 32, 36, 0.48)";
+      ctx.lineWidth = Math.max(1.4, stageSize * 0.0022);
       ctx.lineCap = "round";
-
-      // 上唇のM字ライン
       ctx.beginPath();
       ctx.moveTo(pL.x, pL.y);
-      ctx.quadraticCurveTo((pL.x + pUC.x) * 0.5, pUC.y - 1.5, pUC.x, pUC.y);
-      ctx.quadraticCurveTo((pR.x + pUC.x) * 0.5, pUC.y - 1.5, pR.x, pR.y);
+      ctx.quadraticCurveTo(pUC.x, pUC.y - 1, pR.x, pR.y);
       ctx.stroke();
-
-      // 口が開いているときは下唇の輪郭も優しく引き締める
-      if (this.state.mouthOpen > 0.05) {
-        ctx.strokeStyle = "rgba(95, 42, 52, 0.45)";
-        ctx.beginPath();
-        ctx.moveTo(pL.x, pL.y);
-        ctx.quadraticCurveTo(pLC.x, pLC.y + 2, pR.x, pR.y);
-        ctx.stroke();
-      }
       ctx.restore();
     }
   }

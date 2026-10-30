@@ -1275,7 +1275,7 @@ async function generateAndApplyVtuberAvatar(canvasOrImg = null) {
   if (els.generateVtuberBtn) {
     els.generateVtuberBtn.disabled = true;
     els.generateVtuberBtn.classList.add("is-loading");
-    els.generateVtuberBtn.querySelector(".btn-label").textContent = "Vtuberアバターを生成中...";
+    els.generateVtuberBtn.querySelector(".btn-label").textContent = "首から上アバターを生成中...";
   }
 
   try {
@@ -1292,11 +1292,11 @@ async function generateAndApplyVtuberAvatar(canvasOrImg = null) {
         landmarks: { anchors: studioDraft.anchors },
         settings: avatarEngine.settings,
       });
-      avatarEngine.triggerTestSpeak("あなたの顔写真を基に、Vtuberアバターを作ったよ！どうかな？");
+      avatarEngine.triggerTestSpeak("写真を基に、首から上だけの本人そっくりアバターを生成したよ！どうかな？");
     }
 
     syncAvatarStyleUI("vtuber");
-    showToast("✨ 写真を基に、あなたそっくりのVtuberアバターを生成しました！");
+    showToast("✨ 写真を基に、首から上だけの本人そっくりアバター（アルターエゴ風）を生成しました！");
   } catch (err) {
     console.error("Vtuber生成失敗:", err);
     showToast("Vtuberアバターの生成中にエラーが発生しました: " + err.message);
@@ -1304,7 +1304,7 @@ async function generateAndApplyVtuberAvatar(canvasOrImg = null) {
     if (els.generateVtuberBtn) {
       els.generateVtuberBtn.disabled = false;
       els.generateVtuberBtn.classList.remove("is-loading");
-      els.generateVtuberBtn.querySelector(".btn-label").textContent = "✨ 写真からVtuberアバターを生成";
+      els.generateVtuberBtn.querySelector(".btn-label").textContent = "✨ 写真から首から上アバターを生成";
     }
   }
 }
@@ -1314,13 +1314,13 @@ function syncAvatarStyleUI(style) {
     avatarEngine.settings.avatarStyle = style;
   }
   if (els.avatarStyleBtn) {
-    els.avatarStyleBtn.textContent = style === "vtuber" ? "🌟 Vtuber" : "📸 リアル写真";
+    els.avatarStyleBtn.textContent = style === "vtuber" ? "💻 アルターエゴ" : "📸 生写真メッシュ";
   }
   if (els.sliderAvatarStyle) {
     els.sliderAvatarStyle.value = style;
   }
   if (els.valAvatarStyle) {
-    els.valAvatarStyle.textContent = style === "vtuber" ? "Vtuber" : "リアル写真";
+    els.valAvatarStyle.textContent = style === "vtuber" ? "アルターエゴ" : "生写真メッシュ";
   }
   if (els.vtuberStyleSelect) {
     els.vtuberStyleSelect.value = style;
@@ -1860,7 +1860,7 @@ if (els.avatarStyleBtn) {
     const cur = avatarEngine?.settings?.avatarStyle || "vtuber";
     const next = cur === "vtuber" ? "photomesh" : "vtuber";
     syncAvatarStyleUI(next);
-    showToast(next === "vtuber" ? "🌟 Vtuberアバターモードに切り替えました" : "📸 リアル写真メッシュモードに切り替えました");
+    showToast(next === "vtuber" ? "💻 アルターエゴ（首から上アバター）モードに切り替えました" : "📸 リアル写真メッシュモードに切り替えました");
   });
 }
 
