@@ -323,136 +323,108 @@ def api_delete_avatar(avatar_id: str):
 @app.post("/api/avatars/generate-ai")
 def api_generate_ai_avatar():
     """
-    方法A：外部画像生成AI（OpenAI gpt-image-1 / Gemini 2.5 Flash Image）を用いて
-    顔写真から「首から上だけ・本人そっくり」の表情差分（通常・口開け・笑顔・目閉じ）を生成する。
-    無料枠制限等で外部APIが利用できない場合はステータスを返し、フロントエンドの高精度スプライト生成へ自動連携する。
+    顔写真を Gemini Vision AI で詳細解析し、写真そのものを貼り付けるのではなく
+    本人の特徴（輪郭・髪型・前髪の分け目・目元・眉・鼻・口・メガネ・ヒゲ・肌色・髪色）を忠実に反映した
+    「完全新規の首から上デジタルアバター（アルターエゴ風）」を構築するための設計データ (avatar_spec) を生成する。
     """
     data = request.get_json(silent=True) or {}
     photo_b64 = data.get("photo", "")
     if not photo_b64:
         return error("ベースとなる顔写真データがありません。", 400)
 
-    load_dotenv(BASE_DIR / ".env", override=True)
-    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
     gemini_key = get_gemini_api_key()
+    if not gemini_key:
+        return jsonify(
+            status="local_only",
+            message="Gemini APIキーが未設定のため、ローカル画像解析で新規アバターを生成しました。",
+        )
 
-    img_bytes, ext = decode_data_url_image(photo_b64)
-    mime_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
+    try:
+        from google import genai
+        from google.genai import types
 
-    # 1. OpenAI Images Edit API (gpt-image-1) が設定されている場合
-    if openai_key:
-        try:
-            sprites = {}
-            prompts = {
-                "vtuber": (
-                    "Create a digital avatar portrait (like Danganronpa Alter Ego) of this exact person showing ONLY from the neck up "
-                    "on a dark cyber monitor background. Preserve 100% of their facial identity, hairstyle, eye shape, and glasses. "
-                    "Mouth closed, neutral calm expression, looking straight ahead."
-                ),
-                "vtuber_open": (
-                    "Same exact person and head position from the neck up, digital avatar portrait, "
-                    "mouth naturally open as if speaking a vowel ('ah')."
-                ),
-                "vtuber_smile": (
-                    "Same exact person and head position from the neck up, digital avatar portrait, "
-                    "warm natural smile with mouth closed."
-                ),
-                "vtuber_blink": (
-                    "Same exact person and head position from the neck up, digital avatar portrait, "
-                    "both eyes gently closed in a natural blink, mouth closed."
-                ),
-            }
-            with httpx.Client(timeout=60.0) as client:
-                for key, prompt_text in prompts.items():
-                    files = {"image": (f"input.{ext}", img_bytes, mime_type)}
-                    form_data = {
-                        "model": "gpt-image-1",
-                        "prompt": prompt_text,
-                        "size": "1024x1024",
-                    }
-                    resp = client.post(
-                        "https://api.openai.com/v1/images/edits",
-                        headers={"Authorization": f"Bearer {openai_key}"},
-                        data=form_data,
-                        files=files,
-                    )
-                    if resp.status_code == 200:
-                        rjson = resp.json()
-                        b64_out = rjson["data"][0].get("b64_json")
-                        if b64_out:
-                            sprites[key] = f"data:image/png;base64,{b64_out}"
-                    else:
-                        raise Exception(f"OpenAI HTTP {resp.status_code}: {resp.text[:200]}")
+        img_bytes, ext = decode_data_url_image(photo_b64)
+        mime_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
 
-            if sprites.get("vtuber"):
-                return jsonify(status="ok", provider="openai", sprites=sprites)
-        except Exception as e:
-            print(f"[WARN] OpenAI 画像生成フォールバック: {e}", flush=True)
+        gclient = genai.Client(api_key=gemini_key)
 
-    # 2. Gemini 2.5 Flash Image API が設定されている場合
-    if gemini_key:
-        try:
-            from google import genai
-            from google.genai import types
+        analysis_prompt = """
+あなたは人物の顔写真から「本人そっくりの2.5Dデジタルアバター（首から上だけ）」を新規描画するための特徴解析AIです。
+添付された人物写真の顔立ち・髪型・特徴を細かく観察し、以下のJSON形式のみを出力してください（マークダウンのコードブロックは不要、純粋なJSONのみ）：
 
-            gclient = genai.Client(api_key=gemini_key)
-            sprites = {}
-            prompts = {
-                "vtuber": (
-                    "この写真の人物の顔立ち・髪型・目元・メガネなどの特徴を100%忠実に保ったまま、"
-                    "ダンガンロンパのアルターエゴのように『首から上だけ』のデジタルアバター立ち絵を生成してください。"
-                    "服や肩は描かず首から上のみにし、正面を向いて口を閉じている通常の表情にしてください。"
-                ),
-                "vtuber_open": (
-                    "この写真の人物の顔立ち・髪型・頭の位置を一切変えずに、首から上だけのデジタルアバターとして、"
-                    "話している最中の『口を自然に開けた表情差分（あ）』を生成してください。"
-                ),
-                "vtuber_smile": (
-                    "この写真の人物の顔立ち・髪型・頭の位置を一切変えずに、首から上だけのデジタルアバターとして、"
-                    "優しく微笑んでいる『笑顔の表情差分』を生成してください。"
-                ),
-                "vtuber_blink": (
-                    "この写真の人物の顔立ち・髪型・頭の位置を一切変えずに、首から上だけのデジタルアバターとして、"
-                    "まばたきをして『両目を自然に閉じている表情差分』を生成してください。"
-                ),
-            }
+{
+  "gender_vibe": "male" | "female" | "neutral",
+  "face_shape": "oval" | "round" | "sharp" | "square" | "long",
+  "jaw_taper": 0.75〜1.25の数値（0.8=シャープな顎、1.0=標準、1.2=しっかりしたエラ）,
+  "skin_hex": "#f0c4a8のような明るい自然な肌色HEX",
+  "skin_shadow_hex": "#c9967aのような肌の影色HEX",
+  "hair_style": "short_crop" | "short_spiky" | "short_neat" | "medium_parted" | "bob" | "long_straight" | "long_wavy" | "curly" | "updo",
+  "bangs_style": "parted_center" | "parted_left" | "parted_right" | "full_down" | "swept_side" | "forehead_open",
+  "hair_volume": 0.8〜1.35の数値,
+  "hair_hex": "#1c1b24のような髪色HEX",
+  "hair_highlight_hex": "#3a384aのような髪のハイライト色HEX",
+  "eyebrow_style": "straight" | "arched" | "thick" | "thin" | "sharp" | "gentle",
+  "eyebrow_thickness": 0.7〜1.5の数値,
+  "eyebrow_tilt": -0.25〜0.25の数値（プラスがつり眉、マイナスが下がり眉）,
+  "eye_shape": "almond" | "round" | "narrow" | "monolid" | "double_eyelid" | "droopy" | "sharp",
+  "eye_size": 0.8〜1.25の数値,
+  "eye_slant": -0.25〜0.25の数値（プラスがつり目、マイナスがたれ目）,
+  "double_eyelid": true | false,
+  "eye_bags": true | false,
+  "iris_hex": "#261a14のような瞳の色HEX",
+  "nose_style": "straight" | "small" | "rounded" | "sharp",
+  "mouth_width_scale": 0.85〜1.2の数値,
+  "lip_thickness": 0.7〜1.3の数値,
+  "lip_hex": "#cc7a74のような自然な唇色HEX",
+  "glasses": "none" | "round" | "square" | "boston" | "half_rim",
+  "glasses_hex": "#1e1e24のようなメガネフレーム色HEX",
+  "facial_hair": "none" | "stubble" | "mustache" | "goatee" | "beard",
+  "mole": "none" | "left_cheek" | "right_cheek" | "under_left_eye" | "under_right_eye" | "mouth_left" | "mouth_right"
+}
+""".strip()
 
-            for key, prompt_text in prompts.items():
+        candidate_models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.5-flash-lite"]
+        raw_json_text = ""
+        for model_name in candidate_models:
+            try:
                 res = gclient.models.generate_content(
-                    model="gemini-2.5-flash-image",
+                    model=model_name,
                     contents=[
                         types.Part.from_bytes(data=img_bytes, mime_type=mime_type),
-                        prompt_text,
+                        analysis_prompt,
                     ],
                     config=types.GenerateContentConfig(
-                        response_modalities=["IMAGE", "TEXT"],
+                        temperature=0.2,
+                        max_output_tokens=800,
                     ),
                 )
-                for part in res.candidates[0].content.parts:
-                    if part.inline_data and part.inline_data.data:
-                        out_b64 = base64.b64encode(part.inline_data.data).decode("ascii")
-                        out_mime = part.inline_data.mime_type or "image/png"
-                        sprites[key] = f"data:{out_mime};base64,{out_b64}"
-                        break
+                if res and res.text:
+                    raw_json_text = res.text.strip()
+                    break
+            except Exception as inner_e:
+                print(f"[WARN] Gemini Vision ({model_name}) 試行エラー: {inner_e}", flush=True)
+                continue
 
-            if sprites.get("vtuber"):
-                return jsonify(status="ok", provider="gemini", sprites=sprites)
-        except Exception as e:
-            err_msg = str(e)
-            print(f"[INFO] Gemini 画像生成API制限（ローカル差分生成エンジンへ自動切替）: {err_msg[:180]}", flush=True)
-            return jsonify(
-                status="fallback_local",
-                provider="local_sprite",
-                message=(
-                    "✨ 写真を基に「通常・口開け・笑顔・目閉じ」の4枚のアルターエゴ表情差分を生成しました！"
-                    "（※Gemini無料枠のため内蔵AI差分エンジンを使用。Google AI Studioで課金枠を有効化またはOPENAI_API_KEY設定でクラウド生成も自動適用されます）"
-                ),
-            )
+        if raw_json_text:
+            cleaned = re.sub(r"^```(?:json)?s*", "", raw_json_text)
+            cleaned = re.sub(r"s*```$", "", cleaned).strip()
+            m = re.search(r"{[sS]*}", cleaned)
+            if m:
+                spec = json.loads(m.group(0))
+                print(f"[DEBUG] Gemini Vision アバター特徴解析完了: {spec}", flush=True)
+                return jsonify(
+                    status="ok",
+                    provider="gemini_vision",
+                    avatar_spec=spec,
+                    message="✨ Gemini AIが写真の顔立ち・髪型・特徴を解析し、完全新規アバターを生成しました！",
+                )
+    except Exception as e:
+        print(f"[WARN] Gemini Vision アバター解析エラー: {e}", flush=True)
 
     return jsonify(
-        status="fallback_local",
-        provider="local_sprite",
-        message="✨ 写真を基に「通常・口開け・笑顔・目閉じ」の4枚のアルターエゴ表情差分を生成しました！",
+        status="local_only",
+        provider="local_analyzer",
+        message="✨ 写真のランドマークと色彩・髪型シルエットを解析し、完全新規アバターを生成しました！",
     )
 
 
