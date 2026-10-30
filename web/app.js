@@ -1276,56 +1276,31 @@ async function generateAndApplyVtuberAvatar(canvasOrImg = null) {
   if (els.generateVtuberBtn) {
     els.generateVtuberBtn.disabled = true;
     els.generateVtuberBtn.classList.add("is-loading");
-    els.generateVtuberBtn.querySelector(".btn-label").textContent = "AIで写真の特徴から新規アバターを作成中...";
+    els.generateVtuberBtn.querySelector(".btn-label").textContent = "3Dリアルヘッドモデルを構築中...";
   }
 
   try {
     const anchors = studioDraft.anchors || avatarEngine?.anchors;
-    const baseDataUrl = studioDraft.photos.base || (source.toDataURL ? source.toDataURL("image/jpeg", 0.92) : null);
-
-    let aiSpec = null;
-    let aiMessage = "✨ 写真の特徴（輪郭・目鼻立ち・髪型）から完全新規アバターを作成しました！";
-
-    if (baseDataUrl) {
-      try {
-        const res = await fetch("/api/avatars/generate-ai", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ photo: baseDataUrl, anchors }),
-        });
-        const data = await res.json();
-        if (res.ok && data.avatar_spec) {
-          aiSpec = data.avatar_spec;
-          studioDraft.avatarSpec = aiSpec;
-          if (data.message) aiMessage = data.message;
-        }
-      } catch (apiErr) {
-        console.warn("Gemini Vision アバター解析スキップ（ローカル解析を使用）:", apiErr);
-      }
-    }
 
     if (avatarEngine) {
       avatarEngine.settings.avatarStyle = "vtuber";
-      avatarEngine.updateAnchors(anchors, aiSpec);
-      const renderedCanvas = window.FaceMirrorEngine.generateVtuberAvatar(
-        source,
-        anchors,
-        avatarEngine.avatarSpec
-      );
+      avatarEngine.updateAnchors(anchors);
+      const renderedCanvas = window.FaceMirrorEngine.generateVtuberAvatar(source, anchors);
+      avatarEngine.images.vtuber = renderedCanvas;
       studioDraft.photos.vtuber = renderedCanvas.toDataURL("image/png");
-      avatarEngine.triggerTestSpeak("写真の特徴を基に、ゼロから新しいアバターを作成したよ！どうかな？");
+      avatarEngine.triggerTestSpeak("3Dリアルヘッドモデルを再構築したよ！表情や首の立体感はどうかな？");
     }
 
     syncAvatarStyleUI("vtuber");
-    showToast(aiMessage);
+    showToast("✨ 写真からFIFA風 3Dリアルヘッドモデル（首から上）を生成しました！");
   } catch (err) {
-    console.error("新規アバター作成エラー:", err);
-    showToast("新規アバター作成中にエラーが発生しました: " + err.message);
+    console.error("3Dアバター作成エラー:", err);
+    showToast("3Dアバター作成中にエラーが発生しました: " + err.message);
   } finally {
     if (els.generateVtuberBtn) {
       els.generateVtuberBtn.disabled = false;
       els.generateVtuberBtn.classList.remove("is-loading");
-      els.generateVtuberBtn.querySelector(".btn-label").textContent = "✨ 写真から新規アバターを生成";
+      els.generateVtuberBtn.querySelector(".btn-label").textContent = "✨ 3Dリアルヘッドモデルを再生成";
     }
   }
 }
