@@ -2,6 +2,7 @@
 Mirai Voice Studio - バックエンドサーバー
 1. クローン音声によるテキスト読み上げ (TTS)
 2. Gemini API を使った「人格コピーAI」との音声対話 (Chat + TTS)
+3. 顔写真からのリアル2.5Dアバター管理 (Face Mirror)
 
 起動:
   python app.py                 # http://127.0.0.1:5000 が自動で開きます
@@ -9,11 +10,15 @@ Mirai Voice Studio - バックエンドサーバー
 
 import argparse
 import base64
+import json
 import os
 import re
+import shutil
 import threading
 import time
+import uuid
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -34,14 +39,20 @@ from voice_clone import BASE_DIR, DEFAULT_MODEL, load_voices, resolve_voice_id
 load_dotenv(BASE_DIR / ".env")
 
 WEB_DIR = BASE_DIR / "web"
+AVATARS_DIR = BASE_DIR / "avatars"
+AVATARS_INDEX_FILE = AVATARS_DIR / "avatars.json"
 PERSONA_FILE = BASE_DIR / "persona.txt"
 MAX_TEXT_LENGTH = 1000
 SPEED_RANGE = (0.5, 2.0)
 
+AVATARS_DIR.mkdir(exist_ok=True)
+
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 写真複数枚アップロード用に50MB上限
 
 _fish_client: FishAudio | None = None
 _fish_lock = threading.Lock()
+_avatar_lock = threading.Lock()
 
 
 def get_fish_client() -> FishAudio:
@@ -90,6 +101,38 @@ def error(message: str, status: int):
     return jsonify(error=message), status
 
 
+# ---------- アバター管理ヘルパー ----------
+
+def load_avatars_index() -> list[dict]:
+    if not AVATARS_INDEX_FILE.exists():
+        return []
+    try:
+        data = json.loads(AVATARS_INDEX_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_avatars_index(items: list[dict]) -> None:
+    AVATARS_DIR.mkdir(exist_ok=True)
+    AVATARS_INDEX_FILE.write_text(
+        json.dumps(items, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def decode_data_url_image(data_url: str) -> tuple[bytes, str]:
+    """data:image/png;base64,... 形式の文字列をデコードして (bytes, ext) を返す"""
+    m = re.match(r"^data:image/([a-zA-Z0-9+.-]+);base64,(.+)$", data_url, re.DOTALL)
+    if not m:
+        raw = base64.b64decode(data_url)
+        return raw, "png"
+    fmt = m.group(1).lower()
+    ext = "jpg" if fmt in ("jpeg", "jpg") else ("webp" if fmt == "webp" else "png")
+    raw = base64.b64decode(m.group(2))
+    return raw, ext
+
+
 # ---------- ルーティング ----------
 
 @app.get("/")
@@ -133,6 +176,156 @@ def api_save_persona():
     save_persona_text(prompt)
     return jsonify(status="ok")
 
+
+# ---------- Face Mirror アバター API ----------
+
+@app.get("/api/avatars")
+def api_list_avatars():
+    """登録済みアバター一覧を取得"""
+    with _avatar_lock:
+        avatars = load_avatars_index()
+    return jsonify(avatars=avatars)
+
+
+@app.post("/api/avatars")
+def api_create_avatar():
+    """
+    1枚または複数枚の顔写真からリアルアバターを登録する
+    JSON Body:
+      {
+        "name": "拓（リアルアバター）",
+        "photos": {
+          "base": "data:image/png;base64,...",
+          "open": "data:image/png;base64,...",   # 任意（口を開けた顔）
+          "smile": "data:image/png;base64,...",  # 任意（笑顔）
+          "extra": ["data:image/png;base64,..."] # 任意（追加アングル・表情）
+        },
+        "landmarks": { ... },
+        "settings": { ... }
+      }
+    """
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip() or "マイアバター"
+    photos = data.get("photos") or {}
+    landmarks = data.get("landmarks") or {}
+    settings = data.get("settings") or {}
+
+    base_b64 = photos.get("base")
+    if not base_b64:
+        return error("ベースとなる正面の顔写真（少なくとも1枚）をアップロードしてください。", 400)
+
+    avatar_id = uuid.uuid4().hex[:12]
+    avatar_folder = AVATARS_DIR / avatar_id
+    avatar_folder.mkdir(parents=True, exist_ok=True)
+
+    saved_urls: dict[str, str | list[str]] = {}
+    photo_count = 0
+
+    try:
+        for role_key in ("base", "open", "smile"):
+            b64_str = photos.get(role_key)
+            if b64_str and isinstance(b64_str, str):
+                img_bytes, ext = decode_data_url_image(b64_str)
+                fname = f"{role_key}.{ext}"
+                (avatar_folder / fname).write_bytes(img_bytes)
+                saved_urls[role_key] = f"/avatars/{avatar_id}/{fname}"
+                photo_count += 1
+
+        extra_list = photos.get("extra")
+        if isinstance(extra_list, list):
+            extra_urls = []
+            for idx, b64_str in enumerate(extra_list[:6]):
+                if b64_str and isinstance(b64_str, str):
+                    img_bytes, ext = decode_data_url_image(b64_str)
+                    fname = f"extra_{idx}.{ext}"
+                    (avatar_folder / fname).write_bytes(img_bytes)
+                    extra_urls.append(f"/avatars/{avatar_id}/{fname}")
+                    photo_count += 1
+            if extra_urls:
+                saved_urls["extra"] = extra_urls
+
+        avatar_entry = {
+            "id": avatar_id,
+            "name": name,
+            "photos": saved_urls,
+            "photo_count": photo_count,
+            "landmarks": landmarks,
+            "settings": settings,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+        with _avatar_lock:
+            avatars = load_avatars_index()
+            avatars.insert(0, avatar_entry)
+            save_avatars_index(avatars)
+
+        return jsonify(status="ok", avatar=avatar_entry)
+    except Exception as e:
+        shutil.rmtree(avatar_folder, ignore_errors=True)
+        return error(f"アバター画像の保存に失敗しました: {e}", 500)
+
+
+@app.put("/api/avatars/<avatar_id>")
+def api_update_avatar(avatar_id: str):
+    """アバターの設定やランドマーク微調整、追加写真を更新する"""
+    data = request.get_json(silent=True) or {}
+    with _avatar_lock:
+        avatars = load_avatars_index()
+        target = next((a for a in avatars if a.get("id") == avatar_id), None)
+        if not target:
+            return error("指定されたアバターが見つかりません。", 404)
+
+        if "name" in data and str(data["name"]).strip():
+            target["name"] = str(data["name"]).strip()
+        if "landmarks" in data and isinstance(data["landmarks"], dict):
+            target["landmarks"] = data["landmarks"]
+        if "settings" in data and isinstance(data["settings"], dict):
+            target["settings"] = data["settings"]
+
+        new_photos = data.get("photos")
+        if isinstance(new_photos, dict):
+            avatar_folder = AVATARS_DIR / avatar_id
+            avatar_folder.mkdir(parents=True, exist_ok=True)
+            saved_urls = dict(target.get("photos") or {})
+            for role_key in ("base", "open", "smile"):
+                b64_str = new_photos.get(role_key)
+                if b64_str and isinstance(b64_str, str) and b64_str.startswith("data:"):
+                    img_bytes, ext = decode_data_url_image(b64_str)
+                    fname = f"{role_key}.{ext}"
+                    (avatar_folder / fname).write_bytes(img_bytes)
+                    saved_urls[role_key] = f"/avatars/{avatar_id}/{fname}"
+            target["photos"] = saved_urls
+            target["photo_count"] = sum(
+                1 for k in ("base", "open", "smile") if saved_urls.get(k)
+            ) + len(saved_urls.get("extra", []))
+
+        save_avatars_index(avatars)
+        return jsonify(status="ok", avatar=target)
+
+
+@app.delete("/api/avatars/<avatar_id>")
+def api_delete_avatar(avatar_id: str):
+    """アバターを削除"""
+    with _avatar_lock:
+        avatars = load_avatars_index()
+        new_avatars = [a for a in avatars if a.get("id") != avatar_id]
+        if len(new_avatars) == len(avatars):
+            return error("アバターが見つかりません。", 404)
+        save_avatars_index(new_avatars)
+
+    avatar_folder = AVATARS_DIR / avatar_id
+    if avatar_folder.exists() and avatar_folder.is_dir():
+        shutil.rmtree(avatar_folder, ignore_errors=True)
+
+    return jsonify(status="ok")
+
+
+@app.get("/avatars/<path:filename>")
+def serve_avatar_file(filename: str):
+    return send_from_directory(AVATARS_DIR, filename)
+
+
+# ---------- TTS & AI対話エンドポイント ----------
 
 @app.post("/api/tts")
 def api_tts():
@@ -236,7 +429,6 @@ def api_chat_stream():
     system_prompt = custom_persona if custom_persona else load_persona_text()
 
     def generate_sse():
-        import json
         from google import genai
         from google.genai import types
 
@@ -392,7 +584,7 @@ def api_chat_stream():
             print(f"[DEBUG] ストリーミング処理エラー: {e}", flush=True)
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
-    from flask import Response, stream_with_context
+    from flask import stream_with_context
     return Response(stream_with_context(generate_sse()), mimetype="text/event-stream")
 
 

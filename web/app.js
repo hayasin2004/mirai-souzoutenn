@@ -5,23 +5,75 @@ const $ = (id) => document.getElementById(id);
 const els = {
   // ナビ & バッジ
   tabChat: $("tab-chat"),
+  tabAvatar: $("tab-avatar"),
   tabTts: $("tab-tts"),
+  tabLine: $("tab-line"),
   panelChat: $("panel-chat"),
+  panelAvatar: $("panel-avatar"),
   panelTts: $("panel-tts"),
+  panelLine: $("panel-line"),
   modelBadge: $("model-badge"),
   geminiBadge: $("gemini-badge"),
   personaBtn: $("persona-btn"),
 
   // 共通コントロール
   voice: $("voice-select"),
+  avatarSelect: $("avatar-select"),
   speed: $("speed-range"),
   speedValue: $("speed-value"),
 
   // チャット
   chatMessages: $("chat-messages"),
   chatInput: $("chat-input"),
+  micChatBtn: $("mic-chat-btn"),
   sendChatBtn: $("send-chat-btn"),
   enableTtsToggle: $("enable-tts-toggle"),
+
+  // リアル顔アバターステージ & 全画面UI
+  avatarCanvas: $("avatar-canvas"),
+  avatarStage: $("avatar-stage"),
+  avatarStateBadge: $("avatar-state-badge"),
+  avatarTestBtn: $("avatar-test-btn"),
+  avatarWireframeBtn: $("avatar-wireframe-btn"),
+  openAvatarTabBtn: $("open-avatar-tab-btn"),
+  avatarFullscreenBtn: $("avatar-fullscreen-btn"),
+  exitFullscreenBtn: $("exit-fullscreen-btn"),
+  fsAvatarName: $("fs-avatar-name"),
+  fsChatInput: $("fs-chat-input"),
+  fsMicBtn: $("fs-mic-btn"),
+  fsSendBtn: $("fs-send-btn"),
+
+  // アバター作成スタジオ
+  avatarNameInput: $("avatar-name-input"),
+  webcamOpenBtn: $("webcam-open-btn"),
+  webcamBox: $("webcam-box"),
+  webcamVideo: $("webcam-video"),
+  captureBaseBtn: $("capture-base-btn"),
+  captureOpenBtn: $("capture-open-btn"),
+  captureSmileBtn: $("capture-smile-btn"),
+  webcamCloseBtn: $("webcam-close-btn"),
+  slotBase: $("slot-base"),
+  slotOpen: $("slot-open"),
+  slotSmile: $("slot-smile"),
+  previewBase: $("preview-base"),
+  previewOpen: $("preview-open"),
+  previewSmile: $("preview-smile"),
+  fileBase: $("file-base"),
+  fileOpen: $("file-open"),
+  fileSmile: $("file-smile"),
+  calibCanvas: $("calib-canvas"),
+  redetectLandmarksBtn: $("redetect-landmarks-btn"),
+  landmarkStatus: $("landmark-status"),
+  sliderMouthSens: $("slider-mouth-sens"),
+  valMouthSens: $("val-mouth-sens"),
+  sliderHeadMotion: $("slider-head-motion"),
+  valHeadMotion: $("val-head-motion"),
+  sliderDepthScale: $("slider-depth-scale"),
+  valDepthScale: $("val-depth-scale"),
+  sliderBlinkRate: $("slider-blink-rate"),
+  valBlinkRate: $("val-blink-rate"),
+  saveAvatarBtn: $("save-avatar-btn"),
+  deleteAvatarBtn: $("delete-avatar-btn"),
 
   // TTS読み上げ
   ttsText: $("tts-text"),
@@ -50,8 +102,6 @@ const els = {
   personaStatus: $("persona-status"),
 
   // LINE育成
-  tabLine: $("tab-line"),
-  panelLine: $("panel-line"),
   lineBadge: $("line-badge"),
   lineConfigStatus: $("line-config-status"),
   lineTotalCount: $("line-total-count"),
@@ -68,6 +118,7 @@ const els = {
 
 const MAX_HISTORY = 20;
 const STORAGE_KEY = "mirai-voice:last-voice";
+const AVATAR_STORAGE_KEY = "mirai-voice:last-avatar";
 
 let maxLength = 1000;
 let history = []; // { id, text, voice, url, filename, createdAt }
@@ -76,6 +127,16 @@ let activeId = null;
 let audioCtx = null;
 let analyser = null;
 let freqData = null;
+
+// アバター管理状態
+let avatarEngine = null;
+let savedAvatars = [];
+let studioDraft = {
+  photos: { base: null, open: null, smile: null },
+  anchors: null,
+  detectedBy: "",
+};
+let webcamStream = null;
 
 /* ---------- ユーティリティ ---------- */
 
@@ -92,6 +153,7 @@ function timestampForFile(d) {
 }
 
 function setRangeFill(input) {
+  if (!input) return;
   const min = Number(input.min) || 0;
   const max = Number(input.max) || 1;
   const pct = max > min ? ((Number(input.value) - min) / (max - min)) * 100 : 0;
@@ -115,6 +177,23 @@ function b64ToBlobUrl(b64, mimeType = "audio/mpeg") {
   const byteArray = new Uint8Array(byteNumbers);
   const blob = new Blob([byteArray], { type: mimeType });
   return URL.createObjectURL(blob);
+}
+
+function updateAvatarStateUI(mode, subtitleText = null) {
+  if (!els.avatarStateBadge) return;
+  els.avatarStateBadge.classList.remove("is-thinking", "is-speaking");
+  if (mode === "thinking") {
+    els.avatarStateBadge.textContent = "思考中...";
+    els.avatarStateBadge.classList.add("is-thinking");
+  } else if (mode === "speaking") {
+    els.avatarStateBadge.textContent = "🔊 発話中";
+    els.avatarStateBadge.classList.add("is-speaking");
+  } else {
+    els.avatarStateBadge.textContent = "待機中";
+  }
+  if (avatarEngine) {
+    avatarEngine.setMode(mode, subtitleText || "");
+  }
 }
 
 /* ---------- 初期設定・ステータス ---------- */
@@ -165,6 +244,7 @@ async function loadVoices() {
 function switchTab(targetBtn, targetPanel) {
   const tabs = [
     { btn: els.tabChat, panel: els.panelChat },
+    { btn: els.tabAvatar, panel: els.panelAvatar },
     { btn: els.tabTts, panel: els.panelTts },
     { btn: els.tabLine, panel: els.panelLine },
   ];
@@ -177,6 +257,10 @@ function switchTab(targetBtn, targetPanel) {
   }
   if (targetBtn === els.tabLine) {
     loadLineStatus();
+  } else if (targetBtn === els.tabAvatar) {
+    drawCalibrationCanvas();
+  } else {
+    stopWebcam();
   }
 }
 
@@ -184,6 +268,21 @@ els.tabChat.addEventListener("click", () => {
   switchTab(els.tabChat, els.panelChat);
   els.chatInput.focus();
 });
+
+if (els.tabAvatar) {
+  els.tabAvatar.addEventListener("click", () => {
+    switchTab(els.tabAvatar, els.panelAvatar);
+  });
+}
+
+if (els.openAvatarTabBtn) {
+  els.openAvatarTabBtn.addEventListener("click", () => {
+    if (document.body.classList.contains("is-avatar-fullscreen")) {
+      toggleAvatarFullscreen(false);
+    }
+    switchTab(els.tabAvatar, els.panelAvatar);
+  });
+}
 
 els.tabTts.addEventListener("click", () => {
   switchTab(els.tabTts, els.panelTts);
@@ -207,7 +306,7 @@ async function loadLineStatus() {
     if (els.lineBadge) {
       if (data.configured) {
         els.lineBadge.textContent = "LINE: 連携済";
-        els.lineBadge.className = "badge badge-success";
+        els.lineBadge.className = "badge badge-ok";
       } else {
         els.lineBadge.textContent = "LINE: 未設定";
         els.lineBadge.className = "badge badge-warn";
@@ -222,7 +321,6 @@ async function loadLineStatus() {
     if (els.lineUnlearnedCount) els.lineUnlearnedCount.textContent = `${data.unlearned_logs} 件`;
     if (els.lineLogsBadge) els.lineLogsBadge.textContent = `${data.total_logs} 件`;
 
-    // Webhook URL の表示（現在のホストから自動生成）
     if (els.webhookUrlCode) {
       const url = `${window.location.origin}/api/line/webhook`;
       els.webhookUrlCode.textContent = url;
@@ -243,7 +341,6 @@ function renderLineLogs(logs) {
     return;
   }
 
-  // 新しい順に表示
   const reversed = [...logs].reverse();
   for (const item of reversed) {
     const card = document.createElement("div");
@@ -260,7 +357,7 @@ function renderLineLogs(logs) {
     const metaFoot = document.createElement("div");
     metaFoot.className = "log-meta-foot";
 
-    const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "";
+    const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const statusClass = item.learned ? "learned" : "unlearned";
     const statusText = item.learned ? "学習済" : "未学習";
 
@@ -310,7 +407,6 @@ if (els.lineLearnBtn) {
 
       showToast(data.message || "LINEの会話からAI人格を学習・更新しました！");
       await loadLineStatus();
-      await loadPersona();
     } catch (e) {
       showToast(e.message);
     } finally {
@@ -321,14 +417,51 @@ if (els.lineLearnBtn) {
   });
 }
 
-/* ---------- オーディオキュー管理（ストリーミング連続再生） ---------- */
+/* ---------- オーディオグラフ & ストリーミングキュー再生 ---------- */
+
+// ストリーミング再生用の専用 Audio 要素（Web Audio API の AnalyserNode に接続してアバターの口パクを駆動）
+const streamAudioEl = new Audio();
+streamAudioEl.preload = "auto";
+let streamSourceConnected = false;
+
+function ensureAudioGraph() {
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    audioCtx = new Ctx();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.72;
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+
+    audioCtx.createMediaElementSource(els.audio).connect(analyser);
+    audioCtx.createMediaElementSource(streamAudioEl).connect(analyser);
+    streamSourceConnected = true;
+    analyser.connect(audioCtx.destination);
+
+    if (avatarEngine) {
+      avatarEngine.connectAudioAnalyser(
+        analyser,
+        () => (!els.audio.paused && !els.audio.ended) || audioQueue.isPlaying
+      );
+    }
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
 
 class AudioQueuePlayer {
   constructor() {
     this.queue = [];
     this.isPlaying = false;
-    this.currentAudio = null;
     this.onStateChange = null;
+
+    streamAudioEl.addEventListener("ended", () => {
+      this.playNext();
+    });
+    streamAudioEl.addEventListener("error", (e) => {
+      console.warn("セグメント再生エラー:", e);
+      this.playNext();
+    });
   }
 
   enqueue(item) {
@@ -340,35 +473,25 @@ class AudioQueuePlayer {
 
   clear() {
     this.queue = [];
-    if (this.currentAudio) {
-      this.currentAudio.pause();
-      this.currentAudio = null;
-    }
+    streamAudioEl.pause();
+    streamAudioEl.removeAttribute("src");
     this.isPlaying = false;
   }
 
   playNext() {
     if (this.queue.length === 0) {
       this.isPlaying = false;
-      this.currentAudio = null;
       if (this.onStateChange) this.onStateChange(false, null);
       return;
     }
 
+    ensureAudioGraph();
     this.isPlaying = true;
     const current = this.queue.shift();
     if (this.onStateChange) this.onStateChange(true, current);
 
-    const audio = new Audio(current.url);
-    this.currentAudio = audio;
-    audio.onended = () => {
-      this.playNext();
-    };
-    audio.onerror = (e) => {
-      console.warn("セグメント再生エラー:", e);
-      this.playNext();
-    };
-    audio.play().catch((err) => {
+    streamAudioEl.src = current.url;
+    streamAudioEl.play().catch((err) => {
       console.warn("自動再生エラー:", err);
       this.playNext();
     });
@@ -387,9 +510,12 @@ const audioQueue = new AudioQueuePlayer();
 
 audioQueue.onStateChange = (playing, current) => {
   if (playing && current) {
-    els.nowPlaying.textContent = `市川 拓（たく）: ${current.text}`;
+    const speakerName = els.voice.value || "AI";
+    els.nowPlaying.textContent = `${speakerName}: ${current.text}`;
+    updateAvatarStateUI("speaking", current.text);
   } else {
     els.nowPlaying.textContent = "待機中";
+    updateAvatarStateUI("idle", "");
   }
 };
 
@@ -398,15 +524,21 @@ audioQueue.onStateChange = (playing, current) => {
 function setChatLoading(loading) {
   els.sendChatBtn.disabled = loading;
   els.sendChatBtn.classList.toggle("is-loading", loading);
+  if (els.fsSendBtn) els.fsSendBtn.disabled = loading;
+
   const withTts = els.enableTtsToggle ? els.enableTtsToggle.checked : false;
   els.sendChatBtn.querySelector(".btn-label").textContent = loading
     ? (withTts ? "思考＆発話中..." : "思考中...")
     : "話す";
-  if (loading) els.nowPlaying.textContent = withTts ? "思考中＆音声生成中..." : "考え中...";
+  if (loading) {
+    els.nowPlaying.textContent = withTts ? "思考中＆音声生成中..." : "考え中...";
+    updateAvatarStateUI("thinking");
+  }
 }
 
-async function sendChat() {
-  const message = els.chatInput.value.trim();
+async function sendChat(overrideMessage = null) {
+  const rawInput = overrideMessage !== null ? overrideMessage : els.chatInput.value;
+  const message = String(rawInput || "").trim();
   const voice = els.voice.value;
 
   if (!message) return;
@@ -417,16 +549,15 @@ async function sendChat() {
 
   const enableTts = els.enableTtsToggle ? els.enableTtsToggle.checked : false;
 
-  if (enableTts) ensureAudioGraph();
+  ensureAudioGraph();
   setChatLoading(true);
 
-  // 1. ユーザーの吹き出しを追加
   appendChatBubble("user", message);
   els.chatInput.value = "";
+  if (els.fsChatInput) els.fsChatInput.value = "";
 
   const speed = Number(els.speed.value);
 
-  // 2. AIの吹き出しをプレースホルダーとして配置（リアルタイムタイピング用）
   const aiBubble = createStreamingAiBubble();
   const textEl = aiBubble.querySelector(".bubble-text");
   const metaEl = aiBubble.querySelector(".bubble-meta");
@@ -464,7 +595,7 @@ async function sendChat() {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n\n");
-      buffer = lines.pop(); // 未完了の行をバッファに残す
+      buffer = lines.pop();
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -486,8 +617,10 @@ async function sendChat() {
           textEl.textContent = fullReplyText;
           if (cursorEl) textEl.appendChild(cursorEl);
           els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+          if (!enableTts) {
+            els.nowPlaying.textContent = fullReplyText;
+          }
         } else if (payload.type === "audio_segment") {
-          // 音声セグメント受信 ➔ 即キュー投入＆再生
           const blobUrl = b64ToBlobUrl(payload.audio_base64);
           const segItem = {
             index: payload.index,
@@ -506,12 +639,8 @@ async function sendChat() {
         } else if (payload.type === "done") {
           if (cursorEl) cursorEl.remove();
 
-          // タイミング情報
           const timing = payload.timing;
           if (timing) {
-            console.log(
-              `[DEBUG] ⏱️ 完了: 合計 ${timing.total_sec}秒 (Gemini初速: ${timing.gemini_first_sec}秒, 最初の声: ${timing.first_audio_sec || "-"}秒, TTS計: ${timing.tts_total_sec}秒)`
-            );
             const timingBadge = document.createElement("span");
             timingBadge.className = "bubble-timing";
             if (timing.enable_tts && timing.first_audio_sec) {
@@ -524,7 +653,6 @@ async function sendChat() {
             metaEl.prepend(timingBadge);
           }
 
-          // 「もう一度聴く」または「声で聴く」ボタンの設定
           const playBtn = document.createElement("button");
           playBtn.className = "bubble-play-btn";
           playBtn.type = "button";
@@ -537,7 +665,6 @@ async function sendChat() {
             });
             metaEl.append(playBtn);
 
-            // 履歴に追加
             addHistory({
               id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
               text: fullReplyText,
@@ -547,7 +674,10 @@ async function sendChat() {
               createdAt: new Date(),
             });
           } else {
-            // TTSがOFFだった場合：オンデマンドで生成するボタン
+            // TTSがOFFだった場合でも、アバターに口パクシミュレーションで喋らせる
+            if (avatarEngine) {
+              avatarEngine.triggerTestSpeak(fullReplyText);
+            }
             playBtn.innerHTML = "🔊 声で聴く";
             playBtn.addEventListener("click", async () => {
               ensureAudioGraph();
@@ -588,7 +718,6 @@ async function sendChat() {
             metaEl.append(playBtn);
           }
 
-          // 会話履歴更新
           chatHistory.push({ role: "user", text: message });
           chatHistory.push({ role: "model", text: fullReplyText });
         } else if (payload.type === "error") {
@@ -601,9 +730,17 @@ async function sendChat() {
     showToast(e.message);
     textEl.textContent = `（エラー: ${e.message}）`;
     els.nowPlaying.textContent = "対話エラー";
+    updateAvatarStateUI("idle");
   } finally {
     setChatLoading(false);
-    els.chatInput.focus();
+    if (!audioQueue.isPlaying) {
+      updateAvatarStateUI("idle");
+    }
+    if (document.body.classList.contains("is-avatar-fullscreen")) {
+      if (els.fsChatInput) els.fsChatInput.focus();
+    } else {
+      els.chatInput.focus();
+    }
   }
 }
 
@@ -630,7 +767,7 @@ function createStreamingAiBubble() {
 function appendChatBubble(role, text, audioItem = null, timing = null) {
   const bubble = document.createElement("div");
   bubble.className = `chat-bubble chat-bubble-${role === "user" ? "user" : "ai"}`;
-  
+
   const p = document.createElement("p");
   p.textContent = text;
   bubble.append(p);
@@ -657,46 +794,7 @@ function appendChatBubble(role, text, audioItem = null, timing = null) {
         ensureAudioGraph();
         playItem(audioItem);
       });
-    } else {
-      playBtn.innerHTML = "🔊 声で聴く";
-      playBtn.addEventListener("click", async () => {
-        ensureAudioGraph();
-        playBtn.disabled = true;
-        playBtn.innerHTML = "⏳ 生成中...";
-        try {
-          const speed = Number(els.speed.value);
-          const res = await fetch("/api/tts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              text,
-              voice: els.voice.value,
-              speed: speed === 1 ? null : speed,
-            }),
-          });
-          if (!res.ok) throw new Error("音声の生成に失敗しました");
-          const blob = await res.blob();
-          const item = {
-            id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
-            text,
-            voice: els.voice.value,
-            url: URL.createObjectURL(blob),
-            filename: `tts_${timestampForFile(new Date())}.mp3`,
-            createdAt: new Date(),
-          };
-          addHistory(item);
-          playItem(item);
-          playBtn.disabled = false;
-          playBtn.innerHTML = "▶ もう一度聴く";
-          playBtn.onclick = () => playItem(item);
-        } catch (e) {
-          showToast(e.message);
-          playBtn.disabled = false;
-          playBtn.innerHTML = "🔊 声で聴く";
-        }
-      });
     }
-
     meta.append(playBtn);
     bubble.append(meta);
   }
@@ -711,7 +809,10 @@ function setTtsLoading(loading) {
   els.speakBtn.disabled = loading;
   els.speakBtn.classList.toggle("is-loading", loading);
   els.speakBtn.querySelector(".btn-label").textContent = loading ? "生成中..." : "読み上げる";
-  if (loading) els.nowPlaying.textContent = "音声を生成しています...";
+  if (loading) {
+    els.nowPlaying.textContent = "音声を生成しています...";
+    updateAvatarStateUI("thinking");
+  }
 }
 
 async function speakTts() {
@@ -755,6 +856,7 @@ async function speakTts() {
     playItem(item);
   } catch (e) {
     els.nowPlaying.textContent = "生成に失敗しました";
+    updateAvatarStateUI("idle");
     showToast(e.message);
   } finally {
     setTtsLoading(false);
@@ -763,26 +865,14 @@ async function speakTts() {
 
 /* ---------- 再生コントロール ---------- */
 
-function ensureAudioGraph() {
-  if (!audioCtx) {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    audioCtx = new Ctx();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.8;
-    freqData = new Uint8Array(analyser.frequencyBinCount);
-    audioCtx.createMediaElementSource(els.audio).connect(analyser);
-    analyser.connect(audioCtx.destination);
-  }
-  if (audioCtx.state === "suspended") audioCtx.resume();
-}
-
 function playItem(item) {
+  audioQueue.clear();
+  ensureAudioGraph();
   activeId = item.id;
   els.audio.src = item.url;
   els.audio.play().catch(() => showToast("自動再生がブロックされました。再生ボタンを押してください。"));
   els.nowPlaying.textContent = `${item.voice}：${item.text}`;
+  updateAvatarStateUI("speaking", item.text);
   els.playBtn.disabled = false;
   els.seek.disabled = false;
   els.download.href = item.url;
@@ -798,9 +888,19 @@ function togglePlay() {
   else els.audio.pause();
 }
 
-els.audio.addEventListener("play", () => els.playBtn.classList.add("is-playing"));
-els.audio.addEventListener("pause", () => els.playBtn.classList.remove("is-playing"));
-els.audio.addEventListener("ended", () => els.playBtn.classList.remove("is-playing"));
+els.audio.addEventListener("play", () => {
+  els.playBtn.classList.add("is-playing");
+  const activeItem = history.find((h) => h.id === activeId);
+  updateAvatarStateUI("speaking", activeItem ? activeItem.text : "");
+});
+els.audio.addEventListener("pause", () => {
+  els.playBtn.classList.remove("is-playing");
+  if (!audioQueue.isPlaying) updateAvatarStateUI("idle");
+});
+els.audio.addEventListener("ended", () => {
+  els.playBtn.classList.remove("is-playing");
+  if (!audioQueue.isPlaying) updateAvatarStateUI("idle");
+});
 els.audio.addEventListener("loadedmetadata", () => {
   els.seek.max = els.audio.duration || 0;
   els.timeTotal.textContent = formatTime(els.audio.duration);
@@ -875,6 +975,7 @@ function clearHistory() {
   els.audio.pause();
   els.audio.removeAttribute("src");
   els.audio.load();
+  audioQueue.clear();
   for (const item of history) URL.revokeObjectURL(item.url);
   history = [];
   activeId = null;
@@ -887,6 +988,7 @@ function clearHistory() {
   els.download.classList.add("is-disabled");
   els.download.removeAttribute("href");
   els.nowPlaying.textContent = "メッセージを送信するか文章を読み上げてください";
+  updateAvatarStateUI("idle");
   renderHistory();
 }
 
@@ -897,6 +999,7 @@ const ctx2d = els.canvas.getContext("2d");
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const { width, height } = els.canvas.getBoundingClientRect();
+  if (width === 0 || height === 0) return;
   els.canvas.width = Math.round(width * dpr);
   els.canvas.height = Math.round(height * dpr);
   ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -904,36 +1007,38 @@ function resizeCanvas() {
 
 function draw(t) {
   const { width, height } = els.canvas.getBoundingClientRect();
-  ctx2d.clearRect(0, 0, width, height);
+  if (width > 0 && height > 0) {
+    ctx2d.clearRect(0, 0, width, height);
 
-  const bars = 48;
-  const gap = 4;
-  const barW = (width - gap * (bars - 1)) / bars;
-  const mid = height * 0.45;
-  const playing = analyser && !els.audio.paused;
+    const bars = 48;
+    const gap = 3;
+    const barW = (width - gap * (bars - 1)) / bars;
+    const mid = height * 0.5;
+    const playing = analyser && (!els.audio.paused || audioQueue.isPlaying);
 
-  if (playing) analyser.getByteFrequencyData(freqData);
+    if (playing) analyser.getByteFrequencyData(freqData);
 
-  const grad = ctx2d.createLinearGradient(0, 0, width, 0);
-  grad.addColorStop(0, "hsl(262, 90%, 68%)");
-  grad.addColorStop(0.5, "hsl(220, 90%, 65%)");
-  grad.addColorStop(1, "hsl(190, 95%, 58%)");
-  ctx2d.fillStyle = grad;
+    const grad = ctx2d.createLinearGradient(0, 0, width, 0);
+    grad.addColorStop(0, "hsl(262, 90%, 68%)");
+    grad.addColorStop(0.5, "hsl(220, 90%, 65%)");
+    grad.addColorStop(1, "hsl(190, 95%, 58%)");
+    ctx2d.fillStyle = grad;
 
-  for (let i = 0; i < bars; i++) {
-    let level;
-    if (playing) {
-      const idx = Math.floor((i / bars) * freqData.length * 0.7);
-      level = freqData[idx] / 255;
-    } else {
-      level = 0.05 + 0.04 * Math.sin(t / 600 + i * 0.35);
+    for (let i = 0; i < bars; i++) {
+      let level;
+      if (playing) {
+        const idx = Math.floor((i / bars) * freqData.length * 0.7);
+        level = freqData[idx] / 255;
+      } else {
+        level = 0.08 + 0.05 * Math.sin(t / 600 + i * 0.35);
+      }
+      const h = Math.max(2, level * (height * 0.82));
+      const x = i * (barW + gap);
+      ctx2d.globalAlpha = 0.95;
+      roundRect(x, mid - h / 2, barW, h, barW / 2);
     }
-    const h = Math.max(2, level * (height * 0.7));
-    const x = i * (barW + gap);
-    ctx2d.globalAlpha = 0.95;
-    roundRect(x, mid - h / 2, barW, h, barW / 2);
+    ctx2d.globalAlpha = 1;
   }
-  ctx2d.globalAlpha = 1;
   requestAnimationFrame(draw);
 }
 
@@ -946,6 +1051,527 @@ function roundRect(x, y, w, h, r) {
   ctx2d.arcTo(x, y + h, x, y, r);
   ctx2d.arcTo(x, y, x + w, y, r);
   ctx2d.fill();
+}
+
+/* ---------- Face Mirror アバター管理 & スタジオ機能 ---------- */
+
+function initAvatarEngine() {
+  if (!els.avatarCanvas || !window.FaceMirrorEngine) return;
+  avatarEngine = new window.FaceMirrorEngine.FaceMirrorAvatar(els.avatarCanvas);
+  studioDraft.anchors = JSON.parse(JSON.stringify(avatarEngine.anchors));
+  loadAvatarsList();
+}
+
+async function loadAvatarsList(selectId = null) {
+  try {
+    const res = await fetch("/api/avatars");
+    const data = await res.json();
+    savedAvatars = data.avatars || [];
+
+    els.avatarSelect.innerHTML = "";
+    const demoOpt = document.createElement("option");
+    demoOpt.value = "demo";
+    demoOpt.textContent = "デモアバター（初期）";
+    els.avatarSelect.append(demoOpt);
+
+    for (const av of savedAvatars) {
+      const opt = document.createElement("option");
+      opt.value = av.id;
+      opt.textContent = `${av.name} (${av.photo_count || 1}枚)`;
+      els.avatarSelect.append(opt);
+    }
+
+    const targetId = selectId || localStorage.getItem(AVATAR_STORAGE_KEY) || (savedAvatars[0] && savedAvatars[0].id) || "demo";
+    if (targetId !== "demo" && savedAvatars.some((a) => a.id === targetId)) {
+      els.avatarSelect.value = targetId;
+      await applySelectedAvatar(targetId);
+    } else {
+      els.avatarSelect.value = "demo";
+      await applySelectedAvatar("demo");
+    }
+  } catch (e) {
+    console.warn("アバター一覧の読み込み失敗:", e);
+  }
+}
+
+async function applySelectedAvatar(avatarId) {
+  if (!avatarEngine) return;
+  localStorage.setItem(AVATAR_STORAGE_KEY, avatarId);
+
+  if (avatarId === "demo") {
+    await avatarEngine.loadAvatarData(null);
+    if (els.fsAvatarName) els.fsAvatarName.textContent = "デモアバター（対話モード）";
+    studioDraft.anchors = JSON.parse(JSON.stringify(avatarEngine.anchors));
+    drawCalibrationCanvas();
+    return;
+  }
+
+  const found = savedAvatars.find((a) => a.id === avatarId);
+  if (!found) return;
+
+  await avatarEngine.loadAvatarData(found);
+  if (els.fsAvatarName) els.fsAvatarName.textContent = `${found.name}（ライブ対話中）`;
+
+  // スタジオ側のフォームにも反映
+  els.avatarNameInput.value = found.name || "マイリアルアバター";
+  studioDraft.photos = {
+    base: found.photos.base || null,
+    open: found.photos.open || null,
+    smile: found.photos.smile || null,
+  };
+  studioDraft.anchors = JSON.parse(JSON.stringify(avatarEngine.anchors));
+  renderSlotPreview("base", studioDraft.photos.base);
+  renderSlotPreview("open", studioDraft.photos.open);
+  renderSlotPreview("smile", studioDraft.photos.smile);
+  syncSlidersFromAvatar();
+  drawCalibrationCanvas();
+}
+
+function syncSlidersFromAvatar() {
+  if (!avatarEngine) return;
+  const s = avatarEngine.settings;
+  if (els.sliderMouthSens) {
+    els.sliderMouthSens.value = s.mouthSensitivity;
+    els.valMouthSens.textContent = `${Number(s.mouthSensitivity).toFixed(2)}x`;
+    setRangeFill(els.sliderMouthSens);
+  }
+  if (els.sliderHeadMotion) {
+    els.sliderHeadMotion.value = s.headMotionScale;
+    els.valHeadMotion.textContent = `${Number(s.headMotionScale).toFixed(2)}x`;
+    setRangeFill(els.sliderHeadMotion);
+  }
+  if (els.sliderDepthScale) {
+    els.sliderDepthScale.value = s.depthScale;
+    els.valDepthScale.textContent = `${Number(s.depthScale).toFixed(2)}x`;
+    setRangeFill(els.sliderDepthScale);
+  }
+  if (els.sliderBlinkRate) {
+    els.sliderBlinkRate.value = s.blinkRate;
+    els.valBlinkRate.textContent = `${Number(s.blinkRate).toFixed(2)}x`;
+    setRangeFill(els.sliderBlinkRate);
+  }
+}
+
+function renderSlotPreview(slotKey, dataUrlOrPath) {
+  const previewEl =
+    slotKey === "base" ? els.previewBase : slotKey === "open" ? els.previewOpen : els.previewSmile;
+  if (!previewEl) return;
+
+  if (!dataUrlOrPath) {
+    const placeholders = {
+      base: '👤<br>正面の顔写真<br><small>クリックまたはドロップ</small>',
+      open: '😮<br>口を少し開けた写真<br><small>口内のリアルさ向上</small>',
+      smile: '😊<br>笑顔の写真<br><small>会話中の表情変化用</small>',
+    };
+    previewEl.innerHTML = `<span class="slot-placeholder">${placeholders[slotKey]}</span>`;
+    return;
+  }
+
+  previewEl.innerHTML = "";
+  const img = document.createElement("img");
+  img.src = dataUrlOrPath;
+  img.alt = slotKey;
+  previewEl.append(img);
+}
+
+/**
+ * 読み込んだ画像ファイルを正方形720x720 DataURLに正規化してスタジオにセット
+ */
+async function handleSlotImageFile(slotKey, file) {
+  if (!file || !file.type.startsWith("image/")) {
+    showToast("画像ファイルを選択してください。");
+    return;
+  }
+  const reader = new FileReader();
+  const rawDataUrl = await new Promise((resolve, reject) => {
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  await setSlotImageDataUrl(slotKey, rawDataUrl);
+}
+
+async function setSlotImageDataUrl(slotKey, rawDataUrl) {
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.crossOrigin = "anonymous";
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = rawDataUrl;
+  });
+
+  // 720x720 正方形ポートレートに正規化
+  const normCanvas = avatarEngine
+    ? avatarEngine._normalizePortraitImage(img)
+    : (() => {
+        const c = document.createElement("canvas");
+        c.width = 720;
+        c.height = 720;
+        c.getContext("2d").drawImage(img, 0, 0, 720, 720);
+        return c;
+      })();
+
+  const normalizedDataUrl = normCanvas.toDataURL("image/jpeg", 0.92);
+  studioDraft.photos[slotKey] = normalizedDataUrl;
+  renderSlotPreview(slotKey, normalizedDataUrl);
+
+  // ベース写真が設定されたら即座に3D顔ランドマークを自動検出し、右側のライブアバターにもリアルタイム反映！
+  if (slotKey === "base") {
+    els.landmarkStatus.textContent = "⏳ 顔の3Dメッシュ・ランドマークを自動解析中...";
+    const detection = await window.FaceMirrorEngine.detectFaceAnchors(normCanvas);
+    studioDraft.anchors = detection.anchors;
+    studioDraft.detectedBy = detection.detectedBy;
+    els.landmarkStatus.textContent =
+      detection.detectedBy === "mediapipe-478"
+        ? "✅ AI 478点3D顔メッシュの自動生成が完了しました！（ドラッグで微調整も可能）"
+        : "✅ 顔メッシュを生成しました（必要に応じて緑の点をドラッグして目・口の位置を合わせてください）";
+  }
+
+  // 右ペインのライブアバターで即プレビュー可能にする
+  if (avatarEngine && studioDraft.photos.base) {
+    await avatarEngine.loadAvatarData({
+      name: els.avatarNameInput.value || "プレビューアバター",
+      photos: studioDraft.photos,
+      landmarks: { anchors: studioDraft.anchors },
+      settings: avatarEngine.settings,
+    });
+    drawCalibrationCanvas();
+    avatarEngine.triggerTestSpeak("写真を読み込んだよ！口パクの動きはどうかな？");
+  }
+}
+
+/* ---------- ランドマーク微調整キャンバス (#calib-canvas) ---------- */
+
+const CALIB_HANDLE_KEYS = [
+  { key: "leftEyeTop", label: "左目", color: "#38bdf8" },
+  { key: "rightEyeTop", label: "右目", color: "#38bdf8" },
+  { key: "noseTip", label: "鼻先", color: "#a855f7" },
+  { key: "mouthLeft", label: "左口角", color: "#22c55e" },
+  { key: "mouthRight", label: "右口角", color: "#22c55e" },
+  { key: "upperLipTop", label: "上唇", color: "#f43f5e" },
+  { key: "lipCenter", label: "口中央", color: "#fbbf24" },
+  { key: "lowerLipBottom", label: "下唇", color: "#f43f5e" },
+  { key: "chin", label: "顎先", color: "#e879f9" },
+];
+
+let draggingHandleKey = null;
+
+function drawCalibrationCanvas() {
+  if (!els.calibCanvas || !avatarEngine) return;
+  const canvas = els.calibCanvas;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width;
+  const H = canvas.height;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // 背景に現在のベース画像を描画
+  const baseImg = avatarEngine.images.base;
+  if (baseImg) {
+    ctx.drawImage(baseImg, 0, 0, W, H);
+  }
+
+  // 半透明オーバーレイ
+  ctx.fillStyle = "rgba(8, 10, 22, 0.25)";
+  ctx.fillRect(0, 0, W, H);
+
+  // 三角形メッシュを細線で表示
+  const anchors = studioDraft.anchors || avatarEngine.anchors;
+  const previewMesh = window.FaceMirrorEngine.buildRiggedFaceMesh(anchors);
+  ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
+  ctx.lineWidth = 0.8;
+  for (const [i0, i1, i2] of previewMesh.triangles) {
+    const v0 = previewMesh.vertices[i0];
+    const v1 = previewMesh.vertices[i1];
+    const v2 = previewMesh.vertices[i2];
+    if (v0.role === "bg" && v1.role === "bg" && v2.role === "bg") continue;
+    ctx.beginPath();
+    ctx.moveTo(v0.u * W, v0.v * H);
+    ctx.lineTo(v1.u * W, v1.v * H);
+    ctx.lineTo(v2.u * W, v2.v * H);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // 主要調整ハンドルを描画
+  for (const h of CALIB_HANDLE_KEYS) {
+    const pt = anchors[h.key];
+    if (!pt) continue;
+    const px = pt.x * W;
+    const py = pt.y * H;
+
+    ctx.beginPath();
+    ctx.arc(px, py, 5.5, 0, Math.PI * 2);
+    ctx.fillStyle = h.color;
+    ctx.fill();
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = "#ffffff";
+    ctx.stroke();
+  }
+}
+
+function initCalibrationDrag() {
+  if (!els.calibCanvas) return;
+  const canvas = els.calibCanvas;
+
+  const getPointerNorm = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.max(0.05, Math.min(0.95, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0.05, Math.min(0.95, (e.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  canvas.addEventListener("pointerdown", (e) => {
+    const pos = getPointerNorm(e);
+    const anchors = studioDraft.anchors || avatarEngine.anchors;
+    let bestKey = null;
+    let bestDist = 0.06;
+
+    for (const h of CALIB_HANDLE_KEYS) {
+      const pt = anchors[h.key];
+      if (!pt) continue;
+      const d = Math.hypot(pt.x - pos.x, pt.y - pos.y);
+      if (d < bestDist) {
+        bestDist = d;
+        bestKey = h.key;
+      }
+    }
+
+    if (bestKey) {
+      draggingHandleKey = bestKey;
+      canvas.setPointerCapture(e.pointerId);
+    }
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!draggingHandleKey) return;
+    const pos = getPointerNorm(e);
+    const anchors = studioDraft.anchors || avatarEngine.anchors;
+    const prev = anchors[draggingHandleKey];
+    const dx = pos.x - prev.x;
+    const dy = pos.y - prev.y;
+    anchors[draggingHandleKey] = { x: pos.x, y: pos.y };
+
+    // 目の上まぶたを動かしたときは下まぶた・目頭・目尻も連動して移動しやすくする
+    if (draggingHandleKey === "leftEyeTop") {
+      anchors.leftEyeBottom.x += dx;
+      anchors.leftEyeBottom.y += dy;
+      anchors.leftEyeOuter.x += dx;
+      anchors.leftEyeOuter.y += dy;
+      anchors.leftEyeInner.x += dx;
+      anchors.leftEyeInner.y += dy;
+    } else if (draggingHandleKey === "rightEyeTop") {
+      anchors.rightEyeBottom.x += dx;
+      anchors.rightEyeBottom.y += dy;
+      anchors.rightEyeOuter.x += dx;
+      anchors.rightEyeOuter.y += dy;
+      anchors.rightEyeInner.x += dx;
+      anchors.rightEyeInner.y += dy;
+    }
+
+    avatarEngine.updateAnchors(anchors);
+    drawCalibrationCanvas();
+  });
+
+  const endDrag = () => {
+    draggingHandleKey = null;
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+}
+
+/* ---------- Webカメラ撮影機能 ---------- */
+
+async function startWebcam() {
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 720 }, height: { ideal: 720 }, facingMode: "user" },
+      audio: false,
+    });
+    els.webcamVideo.srcObject = webcamStream;
+    els.webcamBox.classList.remove("is-hidden");
+  } catch (e) {
+    showToast("Webカメラにアクセスできませんでした。カメラの許可設定を確認してください。");
+  }
+}
+
+function stopWebcam() {
+  if (webcamStream) {
+    for (const track of webcamStream.getTracks()) track.stop();
+    webcamStream = null;
+  }
+  if (els.webcamVideo) els.webcamVideo.srcObject = null;
+  if (els.webcamBox) els.webcamBox.classList.add("is-hidden");
+}
+
+async function captureFromWebcam(slotKey) {
+  if (!webcamStream || !els.webcamVideo.videoWidth) {
+    showToast("カメラ映像がまだ準備できていません。");
+    return;
+  }
+  const vw = els.webcamVideo.videoWidth;
+  const vh = els.webcamVideo.videoHeight;
+  const size = Math.min(vw, vh);
+  const sx = (vw - size) * 0.5;
+  const sy = (vh - size) * 0.5;
+
+  const c = document.createElement("canvas");
+  c.width = 720;
+  c.height = 720;
+  const ctx = c.getContext("2d");
+  // ミラー反転して描画
+  ctx.translate(720, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(els.webcamVideo, sx, sy, size, size, 0, 0, 720, 720);
+
+  const dataUrl = c.toDataURL("image/jpeg", 0.92);
+  await setSlotImageDataUrl(slotKey, dataUrl);
+  showToast(
+    slotKey === "base"
+      ? "① ベース顔写真を撮影しました！"
+      : slotKey === "open"
+      ? "② 口開け写真を撮影しました！"
+      : "③ 笑顔写真を撮影しました！"
+  );
+}
+
+/* ---------- アバター保存・削除 ---------- */
+
+async function saveCurrentAvatar() {
+  if (!studioDraft.photos.base) {
+    showToast("少なくとも「① ベース顔（正面写真）」を1枚登録してください。");
+    return;
+  }
+
+  const name = (els.avatarNameInput.value || "").trim() || "マイリアルアバター";
+  els.saveAvatarBtn.disabled = true;
+  els.saveAvatarBtn.classList.add("is-loading");
+
+  try {
+    const payload = {
+      name,
+      photos: studioDraft.photos,
+      landmarks: {
+        anchors: studioDraft.anchors || avatarEngine.anchors,
+        detectedBy: studioDraft.detectedBy || "manual",
+      },
+      settings: avatarEngine ? avatarEngine.settings : {},
+    };
+
+    const currentSelected = els.avatarSelect.value;
+    const isUpdatingExisting =
+      currentSelected &&
+      currentSelected !== "demo" &&
+      savedAvatars.some((a) => a.id === currentSelected && a.name === name);
+
+    const url = isUpdatingExisting ? `/api/avatars/${currentSelected}` : "/api/avatars";
+    const method = isUpdatingExisting ? "PUT" : "POST";
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "アバターの保存に失敗しました");
+
+    showToast(`アバター「${data.avatar.name}」を保存して適用しました！`);
+    stopWebcam();
+    await loadAvatarsList(data.avatar.id);
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    els.saveAvatarBtn.disabled = false;
+    els.saveAvatarBtn.classList.remove("is-loading");
+  }
+}
+
+async function deleteSelectedAvatar() {
+  const currentId = els.avatarSelect.value;
+  if (!currentId || currentId === "demo") {
+    showToast("デモアバターは削除できません。");
+    return;
+  }
+  try {
+    const res = await fetch(`/api/avatars/${currentId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("削除に失敗しました");
+    showToast("アバターを削除しました。");
+    studioDraft.photos = { base: null, open: null, smile: null };
+    renderSlotPreview("base", null);
+    renderSlotPreview("open", null);
+    renderSlotPreview("smile", null);
+    await loadAvatarsList("demo");
+  } catch (e) {
+    showToast(e.message);
+  }
+}
+
+/* ---------- 全画面ビデオ通話モード & 音声入力 (Web Speech API) ---------- */
+
+function toggleAvatarFullscreen(forceState = null) {
+  const next =
+    typeof forceState === "boolean"
+      ? forceState
+      : !document.body.classList.contains("is-avatar-fullscreen");
+  document.body.classList.toggle("is-avatar-fullscreen", next);
+  if (els.avatarFullscreenBtn) {
+    els.avatarFullscreenBtn.classList.toggle("is-active", next);
+  }
+  if (next && els.fsChatInput) {
+    setTimeout(() => els.fsChatInput.focus(), 100);
+  }
+}
+
+function initSpeechRecognition() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) {
+    const warnNoSpeech = () =>
+      showToast("お使いのブラウザは音声認識に対応していません（Chrome / Edge でご利用いただけます）");
+    if (els.micChatBtn) els.micChatBtn.addEventListener("click", warnNoSpeech);
+    if (els.fsMicBtn) els.fsMicBtn.addEventListener("click", warnNoSpeech);
+    return;
+  }
+
+  const rec = new SpeechRec();
+  rec.lang = "ja-JP";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  let isRecording = false;
+
+  const setRecUI = (active) => {
+    isRecording = active;
+    if (els.micChatBtn) els.micChatBtn.classList.toggle("is-recording", active);
+    if (els.fsMicBtn) els.fsMicBtn.classList.toggle("is-recording", active);
+  };
+
+  rec.onresult = (event) => {
+    const transcript = event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : "";
+    if (transcript) {
+      sendChat(transcript);
+    }
+  };
+  rec.onerror = () => setRecUI(false);
+  rec.onend = () => setRecUI(false);
+
+  const toggleMic = () => {
+    if (isRecording) {
+      rec.stop();
+      setRecUI(false);
+    } else {
+      try {
+        rec.start();
+        setRecUI(true);
+        showToast("🎤 話しかけてください...");
+      } catch {
+        setRecUI(false);
+      }
+    }
+  };
+
+  if (els.micChatBtn) els.micChatBtn.addEventListener("click", toggleMic);
+  if (els.fsMicBtn) els.fsMicBtn.addEventListener("click", toggleMic);
 }
 
 /* ---------- 人格設定モーダル ---------- */
@@ -1008,7 +1634,138 @@ els.chatInput.addEventListener("keydown", (e) => {
     if (!els.sendChatBtn.disabled) sendChat();
   }
 });
-els.sendChatBtn.addEventListener("click", sendChat);
+els.sendChatBtn.addEventListener("click", () => sendChat());
+
+// 全画面チャットバーの送信イベント
+if (els.fsChatInput) {
+  els.fsChatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (!els.sendChatBtn.disabled) sendChat(els.fsChatInput.value);
+    }
+  });
+}
+if (els.fsSendBtn) {
+  els.fsSendBtn.addEventListener("click", () => {
+    if (!els.sendChatBtn.disabled) sendChat(els.fsChatInput.value);
+  });
+}
+
+// アバターツールバーボタン
+if (els.avatarTestBtn) {
+  els.avatarTestBtn.addEventListener("click", () => {
+    if (avatarEngine) {
+      avatarEngine.triggerTestSpeak("こんにちは！こんな感じで声に合わせてリアルに口と顔が動くよ！");
+      els.nowPlaying.textContent = "テスト発話中: こんにちは！こんな感じで声に合わせてリアルに口と顔が動くよ！";
+    }
+  });
+}
+
+if (els.avatarWireframeBtn) {
+  els.avatarWireframeBtn.addEventListener("click", () => {
+    if (!avatarEngine) return;
+    avatarEngine.settings.showWireframe = !avatarEngine.settings.showWireframe;
+    els.avatarWireframeBtn.classList.toggle("is-active", avatarEngine.settings.showWireframe);
+  });
+}
+
+if (els.avatarFullscreenBtn) {
+  els.avatarFullscreenBtn.addEventListener("click", () => toggleAvatarFullscreen());
+}
+if (els.exitFullscreenBtn) {
+  els.exitFullscreenBtn.addEventListener("click", () => toggleAvatarFullscreen(false));
+}
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.body.classList.contains("is-avatar-fullscreen")) {
+    toggleAvatarFullscreen(false);
+  }
+});
+
+if (els.avatarSelect) {
+  els.avatarSelect.addEventListener("change", () => {
+    applySelectedAvatar(els.avatarSelect.value);
+  });
+}
+
+// アバタースタジオ：スロットクリック＆ドラッグ＆ドロップ
+const bindPhotoSlot = (slotKey, previewEl, fileInputEl, slotCardEl) => {
+  if (!previewEl || !fileInputEl) return;
+  previewEl.addEventListener("click", () => fileInputEl.click());
+  fileInputEl.addEventListener("change", () => {
+    if (fileInputEl.files && fileInputEl.files[0]) {
+      handleSlotImageFile(slotKey, fileInputEl.files[0]);
+      fileInputEl.value = "";
+    }
+  });
+  if (slotCardEl) {
+    slotCardEl.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      slotCardEl.style.borderColor = "var(--accent-2)";
+    });
+    slotCardEl.addEventListener("dragleave", () => {
+      slotCardEl.style.borderColor = "";
+    });
+    slotCardEl.addEventListener("drop", (e) => {
+      e.preventDefault();
+      slotCardEl.style.borderColor = "";
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleSlotImageFile(slotKey, e.dataTransfer.files[0]);
+      }
+    });
+  }
+};
+
+bindPhotoSlot("base", els.previewBase, els.fileBase, els.slotBase);
+bindPhotoSlot("open", els.previewOpen, els.fileOpen, els.slotOpen);
+bindPhotoSlot("smile", els.previewSmile, els.fileSmile, els.slotSmile);
+
+document.querySelectorAll(".slot-clear-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const slot = btn.dataset.slot;
+    studioDraft.photos[slot] = null;
+    renderSlotPreview(slot, null);
+  });
+});
+
+if (els.webcamOpenBtn) els.webcamOpenBtn.addEventListener("click", startWebcam);
+if (els.webcamCloseBtn) els.webcamCloseBtn.addEventListener("click", stopWebcam);
+if (els.captureBaseBtn) els.captureBaseBtn.addEventListener("click", () => captureFromWebcam("base"));
+if (els.captureOpenBtn) els.captureOpenBtn.addEventListener("click", () => captureFromWebcam("open"));
+if (els.captureSmileBtn) els.captureSmileBtn.addEventListener("click", () => captureFromWebcam("smile"));
+
+if (els.redetectLandmarksBtn) {
+  els.redetectLandmarksBtn.addEventListener("click", async () => {
+    if (!avatarEngine || !avatarEngine.images.base) return;
+    els.landmarkStatus.textContent = "⏳ 再検出中...";
+    const det = await window.FaceMirrorEngine.detectFaceAnchors(avatarEngine.images.base);
+    studioDraft.anchors = det.anchors;
+    avatarEngine.updateAnchors(det.anchors);
+    drawCalibrationCanvas();
+    els.landmarkStatus.textContent = "✅ ランドマークを再検出しました！";
+  });
+}
+
+// スライダーイベント
+const bindAvatarSlider = (sliderEl, outputEl, propName) => {
+  if (!sliderEl || !outputEl) return;
+  setRangeFill(sliderEl);
+  sliderEl.addEventListener("input", () => {
+    const val = Number(sliderEl.value);
+    outputEl.textContent = `${val.toFixed(2)}x`;
+    setRangeFill(sliderEl);
+    if (avatarEngine) {
+      avatarEngine.settings[propName] = val;
+    }
+  });
+};
+
+bindAvatarSlider(els.sliderMouthSens, els.valMouthSens, "mouthSensitivity");
+bindAvatarSlider(els.sliderHeadMotion, els.valHeadMotion, "headMotionScale");
+bindAvatarSlider(els.sliderDepthScale, els.valDepthScale, "depthScale");
+bindAvatarSlider(els.sliderBlinkRate, els.valBlinkRate, "blinkRate");
+
+if (els.saveAvatarBtn) els.saveAvatarBtn.addEventListener("click", saveCurrentAvatar);
+if (els.deleteAvatarBtn) els.deleteAvatarBtn.addEventListener("click", deleteSelectedAvatar);
 
 els.ttsText.addEventListener("input", updateCharCount);
 els.ttsText.addEventListener("keydown", (e) => {
@@ -1031,6 +1788,9 @@ updateSpeed();
 updateCharCount();
 setRangeFill(els.seek);
 resizeCanvas();
+initAvatarEngine();
+initCalibrationDrag();
+initSpeechRecognition();
 requestAnimationFrame(draw);
 loadConfig();
 loadVoices();

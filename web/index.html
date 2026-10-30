@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mirai Voice Studio｜AI人格クローン × 音声対話</title>
-  <meta name="description" content="AIに人格をコピーし、クローンした声でリアルタイムに音声対話できるスタジオ。">
+  <title>Mirai Voice Studio｜AI人格クローン × リアル顔アバター対話</title>
+  <meta name="description" content="AIに人格をコピーし、顔写真から生成したリアルアバターとクローン音声でリアルタイムに対話できるスタジオ。">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
@@ -22,7 +22,7 @@
       </span>
       <div>
         <h1>Mirai Voice Studio</h1>
-        <p class="tagline">AIが人格を持って、あなたの声で話しかけてきます</p>
+        <p class="tagline">顔写真から生成したリアルアバターが、あなたの声と人格でリアルタイムに対話します</p>
       </div>
     </div>
     <div class="header-actions">
@@ -41,6 +41,9 @@
       <button id="tab-chat" class="tab-btn is-active" role="tab" aria-selected="true" type="button">
         💬 AI人格と会話（Gemini対話）
       </button>
+      <button id="tab-avatar" class="tab-btn" role="tab" aria-selected="false" type="button">
+        👤 リアル顔アバター作成・調整
+      </button>
       <button id="tab-tts" class="tab-btn" role="tab" aria-selected="false" type="button">
         📝 テキスト読み上げ（直接入力）
       </button>
@@ -51,15 +54,24 @@
   </nav>
 
   <main class="layout">
-    <!-- 左ペイン: 入力エリア（チャット または 読み上げ） -->
+    <!-- 左ペイン: 入力エリア（チャット / アバター作成 / 読み上げ / LINE） -->
     <section class="card composer">
-      <!-- 共通コントロール: 声と速さ -->
-      <div class="controls-row">
+      <!-- 共通コントロール: 声・アバター・速さ -->
+      <div class="controls-row controls-row-3">
         <label class="field">
           <span class="field-label">声 (クローン)</span>
           <div class="select-wrap">
             <select id="voice-select" aria-label="声を選択">
               <option value="">読み込み中...</option>
+            </select>
+          </div>
+        </label>
+
+        <label class="field">
+          <span class="field-label">顔アバター</span>
+          <div class="select-wrap">
+            <select id="avatar-select" aria-label="顔アバターを選択">
+              <option value="demo">デモアバター（初期）</option>
             </select>
           </div>
         </label>
@@ -74,20 +86,23 @@
       <div id="panel-chat" class="panel-content">
         <div id="chat-messages" class="chat-messages" aria-live="polite">
           <div class="chat-bubble chat-bubble-ai welcome-msg">
-            <p>こんにちは！話しかけてくれたら、設定された人格で考えて声で答えるよ。</p>
+            <p>こんにちは！話しかけてくれたら、設定された人格で考えて、右側のリアルアバターが声と口パクを合わせて答えるよ。</p>
           </div>
         </div>
 
         <div class="chat-options-bar">
-          <label class="toggle-label" title="ONにすると返答時に自動で音声を生成します（混雑時は数秒かかります）">
-            <input id="enable-tts-toggle" type="checkbox">
-            <span class="toggle-text">🔊 音声も自動生成する</span>
+          <label class="toggle-label" title="ONにすると返答時に自動で音声を生成し、アバターがリアルに口パクして喋ります">
+            <input id="enable-tts-toggle" type="checkbox" checked>
+            <span class="toggle-text">🔊 音声＆アバター口パクを自動生成する</span>
           </label>
-          <span class="mode-badge-hint">⚡ OFFなら1秒で爆速返答！</span>
+          <span class="mode-badge-hint">⚡ ストリーミング発話＆60fpsリップシンク対応</span>
         </div>
 
         <div class="chat-input-bar">
           <textarea id="chat-input" rows="2" placeholder="メッセージを入力... (Enterで送信、Shift+Enterで改行)"></textarea>
+          <button id="mic-chat-btn" class="btn-ghost btn-mic" type="button" title="マイクで音声入力">
+            🎤
+          </button>
           <button id="send-chat-btn" class="btn-primary" type="button">
             <span class="btn-spinner" aria-hidden="true"></span>
             <span class="btn-label">話す</span>
@@ -95,7 +110,149 @@
         </div>
       </div>
 
-      <!-- パネル2: テキスト直打ち読み上げモード -->
+      <!-- パネル2: リアル顔アバター作成・調整モード -->
+      <div id="panel-avatar" class="panel-content is-hidden">
+        <div class="avatar-studio-header">
+          <div>
+            <h3 class="studio-title">📸 顔写真からリアル2.5Dアバターを生成</h3>
+            <p class="studio-desc">
+              <strong>正面の写真1枚だけ</strong>でもAIが478点の3D顔ランドマークと立体口内を自動生成します。<br>
+              さらに「口を開けた写真」「笑顔の写真」も追加すると、発話時の表情テクスチャがより本物そっくりにブレンドされます。
+            </p>
+          </div>
+        </div>
+
+        <div class="avatar-name-row">
+          <label class="field">
+            <span class="field-label">アバター名</span>
+            <input id="avatar-name-input" class="text-input" type="text" placeholder="例: 市川 拓（リアルアバター）" value="マイリアルアバター">
+          </label>
+          <button id="webcam-open-btn" class="btn-subtle" type="button">
+            📷 Webカメラで撮影して登録
+          </button>
+        </div>
+
+        <!-- Webカメラ撮影ボックス（必要時のみ展開） -->
+        <div id="webcam-box" class="webcam-box is-hidden">
+          <div class="webcam-preview-wrap">
+            <video id="webcam-video" autoplay playsinline muted></video>
+            <div class="webcam-guide-oval"></div>
+          </div>
+          <div class="webcam-controls">
+            <span class="webcam-hint">枠に顔を合わせて撮影ボタンを押してください</span>
+            <div class="webcam-btn-group">
+              <button id="capture-base-btn" class="btn-primary btn-sm" type="button">① 通常顔を撮影</button>
+              <button id="capture-open-btn" class="btn-subtle" type="button">② 口開け顔を撮影(任意)</button>
+              <button id="capture-smile-btn" class="btn-subtle" type="button">③ 笑顔を撮影(任意)</button>
+              <button id="webcam-close-btn" class="btn-text" type="button">閉じる</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 写真アップロードスロット（1枚必須＋2枚任意） -->
+        <div class="photo-slots-grid">
+          <!-- スロット1: 正面ベース写真（必須） -->
+          <div class="photo-slot is-required" id="slot-base">
+            <div class="slot-badge">必須（1枚でOK）</div>
+            <div class="slot-preview" id="preview-base">
+              <span class="slot-placeholder">👤<br>正面の顔写真<br><small>クリックまたはドロップ</small></span>
+            </div>
+            <input type="file" id="file-base" accept="image/*" hidden>
+            <div class="slot-foot">
+              <span class="slot-title">① ベース顔（口閉じ・正面）</span>
+              <button type="button" class="btn-text slot-clear-btn" data-slot="base">クリア</button>
+            </div>
+          </div>
+
+          <!-- スロット2: 口を開けた写真（任意） -->
+          <div class="photo-slot" id="slot-open">
+            <div class="slot-badge optional">任意（リアル度UP）</div>
+            <div class="slot-preview" id="preview-open">
+              <span class="slot-placeholder">😮<br>口を少し開けた写真<br><small>口内のリアルさ向上</small></span>
+            </div>
+            <input type="file" id="file-open" accept="image/*" hidden>
+            <div class="slot-foot">
+              <span class="slot-title">② 口開け顔（「あ」の口）</span>
+              <button type="button" class="btn-text slot-clear-btn" data-slot="open">クリア</button>
+            </div>
+          </div>
+
+          <!-- スロット3: 笑顔の写真（任意） -->
+          <div class="photo-slot" id="slot-smile">
+            <div class="slot-badge optional">任意（表情ブレンド）</div>
+            <div class="slot-preview" id="preview-smile">
+              <span class="slot-placeholder">😊<br>笑顔の写真<br><small>会話中の表情変化用</small></span>
+            </div>
+            <input type="file" id="file-smile" accept="image/*" hidden>
+            <div class="slot-foot">
+              <span class="slot-title">③ 笑顔（スマイル）</span>
+              <button type="button" class="btn-text slot-clear-btn" data-slot="smile">クリア</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ランドマーク微調整＆モーション設定 -->
+        <div class="studio-calib-grid">
+          <div class="calib-canvas-box">
+            <div class="calib-head">
+              <span class="field-label">🎯 顔パーツ位置の自動検出・微調整（ドラッグで移動可）</span>
+              <button id="redetect-landmarks-btn" class="btn-text" type="button">🔄 自動再検出</button>
+            </div>
+            <div class="calib-canvas-wrap">
+              <canvas id="calib-canvas" width="320" height="320"></canvas>
+            </div>
+            <p id="landmark-status" class="landmark-status">写真を読み込むと自動で目・鼻・口・輪郭の3Dメッシュを生成します</p>
+          </div>
+
+          <div class="motion-sliders-box">
+            <span class="field-label">🎛 モーション・立体感の調整（リアルタイム反映）</span>
+
+            <label class="slider-item">
+              <div class="slider-head">
+                <span>口パクの開き感度</span>
+                <output id="val-mouth-sens">1.25x</output>
+              </div>
+              <input id="slider-mouth-sens" type="range" min="0.5" max="2.5" step="0.05" value="1.25">
+            </label>
+
+            <label class="slider-item">
+              <div class="slider-head">
+                <span>首の揺れ・うなずき量</span>
+                <output id="val-head-motion">1.00x</output>
+              </div>
+              <input id="slider-head-motion" type="range" min="0.0" max="2.0" step="0.05" value="1.0">
+            </label>
+
+            <label class="slider-item">
+              <div class="slider-head">
+                <span>2.5D 立体視パララックス</span>
+                <output id="val-depth-scale">1.00x</output>
+              </div>
+              <input id="slider-depth-scale" type="range" min="0.0" max="2.0" step="0.05" value="1.0">
+            </label>
+
+            <label class="slider-item">
+              <div class="slider-head">
+                <span>まばたき頻度</span>
+                <output id="val-blink-rate">1.00x</output>
+              </div>
+              <input id="slider-blink-rate" type="range" min="0.2" max="2.5" step="0.1" value="1.0">
+            </label>
+
+            <div class="studio-action-buttons">
+              <button id="save-avatar-btn" class="btn-primary" type="button">
+                <span class="btn-spinner" aria-hidden="true"></span>
+                <span class="btn-label">💾 この顔アバターを保存して適用</span>
+              </button>
+              <button id="delete-avatar-btn" class="btn-subtle btn-danger-outline" type="button">
+                🗑 選択中のアバターを削除
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- パネル3: テキスト直打ち読み上げモード -->
       <div id="panel-tts" class="panel-content is-hidden">
         <div class="textarea-wrap">
           <textarea id="tts-text" rows="6" maxlength="1000"
@@ -104,7 +261,7 @@
         </div>
 
         <div class="actions">
-          <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> で読み上げ</span>
+          <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> で読み上げ＆アバター発話</span>
           <button id="speak-btn" class="btn-primary" type="button">
             <span class="btn-spinner" aria-hidden="true"></span>
             <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
@@ -113,7 +270,7 @@
         </div>
       </div>
 
-      <!-- パネル3: LINE育成（会話ログ蓄積 & AI学習） -->
+      <!-- パネル4: LINE育成（会話ログ蓄積 & AI学習） -->
       <div id="panel-line" class="panel-content is-hidden">
         <div class="line-status-box">
           <div class="line-stats-row">
@@ -165,12 +322,60 @@
       </div>
     </section>
 
-    <!-- 右上: 音声プレイヤー -->
-    <section class="card player" aria-labelledby="player-title">
-      <h2 id="player-title" class="card-title">リアルタイム音声再生</h2>
-      <div class="visualizer-wrap">
+    <!-- 右上: リアル顔アバターミラー & 音声プレイヤー -->
+    <section id="avatar-player-card" class="card player" aria-labelledby="player-title">
+      <div class="avatar-card-header">
+        <div class="avatar-title-group">
+          <h2 id="player-title" class="card-title">FACE MIRROR リアルアバター</h2>
+          <span id="avatar-state-badge" class="avatar-state-badge">待機中</span>
+        </div>
+        <div class="avatar-toolbar">
+          <button id="avatar-test-btn" class="btn-chip" type="button" title="口パクと表情のテスト動作">
+            🗣 テスト発話
+          </button>
+          <button id="avatar-wireframe-btn" class="btn-chip" type="button" title="3D顔メッシュの表示切替">
+            🕸 メッシュ
+          </button>
+          <button id="open-avatar-tab-btn" class="btn-chip" type="button" title="写真からアバターを作成・編集">
+            📷 写真登録
+          </button>
+          <button id="avatar-fullscreen-btn" class="btn-chip btn-chip-accent" type="button" title="全画面ビデオ通話モードと通常モードを切り替え">
+            ⛶ 全画面対話
+          </button>
+        </div>
+      </div>
+
+      <!-- リアル2.5Dアバター表示ステージ -->
+      <div id="avatar-stage" class="avatar-stage">
+        <canvas id="avatar-canvas"></canvas>
+
+        <!-- 全画面モード時の上部バー -->
+        <div class="fullscreen-top-bar">
+          <div class="fs-avatar-info">
+            <span class="fs-live-dot"></span>
+            <span id="fs-avatar-name">リアルアバター対話モード</span>
+          </div>
+          <button id="exit-fullscreen-btn" class="btn-subtle btn-exit-fs" type="button">
+            ✕ 通常画面（チャット併設）に戻る
+          </button>
+        </div>
+
+        <!-- リアルタイム字幕オーバーレイ -->
+        <div class="avatar-subtitle-box">
+          <p id="now-playing" class="now-playing">メッセージを送信するか文章を読み上げてください</p>
+        </div>
+
+        <!-- 全画面モード専用のフローティング対話バー -->
+        <div class="fullscreen-chat-bar">
+          <input id="fs-chat-input" type="text" placeholder="アバターに話しかける... (Enterで送信)" autocomplete="off">
+          <button id="fs-mic-btn" class="btn-ghost btn-mic" type="button" title="音声認識で話しかける">🎤</button>
+          <button id="fs-send-btn" class="btn-primary" type="button">話す</button>
+        </div>
+      </div>
+
+      <!-- コンパクト波形ビジュアライザー & 再生トランスポート -->
+      <div class="visualizer-wrap visualizer-compact">
         <canvas id="visualizer" aria-hidden="true"></canvas>
-        <p id="now-playing" class="now-playing">メッセージを送信するか文章を読み上げてください</p>
       </div>
 
       <div class="transport">
@@ -219,11 +424,12 @@
   </dialog>
 
   <footer class="site-footer">
-    自分の声、または本人の同意を得た声だけを使ってください。
+    自分の声・顔写真、または本人の同意を得た素材だけを使ってください。
   </footer>
 
   <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
 
+  <script src="/avatar.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
