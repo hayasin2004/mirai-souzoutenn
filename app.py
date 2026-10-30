@@ -1,4 +1,4 @@
-"""
+﻿"""
 Mirai Voice Studio - バックエンドサーバー
 1. クローン音声によるテキスト読み上げ (TTS)
 2. Gemini API を使った「人格コピーAI」との音声対話 (Chat + TTS)
@@ -222,7 +222,7 @@ def api_create_avatar():
     photo_count = 0
 
     try:
-        for role_key in ("base", "open", "smile"):
+        for role_key in ("base", "open", "smile", "vtuber", "vtuber_open", "vtuber_smile"):
             b64_str = photos.get(role_key)
             if b64_str and isinstance(b64_str, str):
                 img_bytes, ext = decode_data_url_image(b64_str)
@@ -287,7 +287,7 @@ def api_update_avatar(avatar_id: str):
             avatar_folder = AVATARS_DIR / avatar_id
             avatar_folder.mkdir(parents=True, exist_ok=True)
             saved_urls = dict(target.get("photos") or {})
-            for role_key in ("base", "open", "smile"):
+            for role_key in ("base", "open", "smile", "vtuber", "vtuber_open", "vtuber_smile"):
                 b64_str = new_photos.get(role_key)
                 if b64_str and isinstance(b64_str, str) and b64_str.startswith("data:"):
                     img_bytes, ext = decode_data_url_image(b64_str)

@@ -132,7 +132,7 @@ let freqData = null;
 let avatarEngine = null;
 let savedAvatars = [];
 let studioDraft = {
-  photos: { base: null, open: null, smile: null },
+  photos: { base: null, open: null, smile: null, vtuber: null },
   anchors: null,
   detectedBy: "",
 };
@@ -1241,6 +1241,72 @@ async function setSlotImageDataUrl(slotKey, rawDataUrl) {
   }
 }
 
+
+/* ---------- Vtuber アバター自動生成 & スタイル切り替え ---------- */
+
+async function generateAndApplyVtuberAvatar(canvasOrImg = null) {
+  if (!window.FaceMirrorEngine || !window.FaceMirrorEngine.generateVtuberAvatar) return;
+  const source = canvasOrImg || avatarEngine?.images?.base;
+  if (!source) {
+    showToast("先に正面の顔写真をアップロードまたは撮影してください");
+    return;
+  }
+
+  if (els.generateVtuberBtn) {
+    els.generateVtuberBtn.disabled = true;
+    els.generateVtuberBtn.classList.add("is-loading");
+    els.generateVtuberBtn.querySelector(".btn-label").textContent = "Vtuberアバターを生成中...";
+  }
+
+  try {
+    const anchors = studioDraft.anchors || avatarEngine?.anchors;
+    const vtuberCanvas = window.FaceMirrorEngine.generateVtuberAvatar(source, anchors);
+    const vtuberDataUrl = vtuberCanvas.toDataURL("image/png");
+    studioDraft.photos.vtuber = vtuberDataUrl;
+
+    if (avatarEngine) {
+      avatarEngine.settings.avatarStyle = "vtuber";
+      await avatarEngine.loadAvatarData({
+        name: els.avatarNameInput.value || "マイVtuberアバター",
+        photos: studioDraft.photos,
+        landmarks: { anchors: studioDraft.anchors },
+        settings: avatarEngine.settings,
+      });
+      avatarEngine.triggerTestSpeak("あなたの顔写真を基に、Vtuberアバターを作ったよ！どうかな？");
+    }
+
+    syncAvatarStyleUI("vtuber");
+    showToast("✨ 写真を基に、あなたそっくりのVtuberアバターを生成しました！");
+  } catch (err) {
+    console.error("Vtuber生成失敗:", err);
+    showToast("Vtuberアバターの生成中にエラーが発生しました: " + err.message);
+  } finally {
+    if (els.generateVtuberBtn) {
+      els.generateVtuberBtn.disabled = false;
+      els.generateVtuberBtn.classList.remove("is-loading");
+      els.generateVtuberBtn.querySelector(".btn-label").textContent = "✨ 写真からVtuberアバターを生成";
+    }
+  }
+}
+
+function syncAvatarStyleUI(style) {
+  if (avatarEngine) {
+    avatarEngine.settings.avatarStyle = style;
+  }
+  if (els.avatarStyleBtn) {
+    els.avatarStyleBtn.textContent = style === "vtuber" ? "🌟 Vtuber" : "📸 リアル写真";
+  }
+  if (els.sliderAvatarStyle) {
+    els.sliderAvatarStyle.value = style;
+  }
+  if (els.valAvatarStyle) {
+    els.valAvatarStyle.textContent = style === "vtuber" ? "Vtuber" : "リアル写真";
+  }
+  if (els.vtuberStyleSelect) {
+    els.vtuberStyleSelect.value = style;
+  }
+}
+
 /* ---------- ランドマーク微調整キャンバス (#calib-canvas) ---------- */
 
 const CALIB_HANDLE_KEYS = [
@@ -1763,6 +1829,35 @@ bindAvatarSlider(els.sliderMouthSens, els.valMouthSens, "mouthSensitivity");
 bindAvatarSlider(els.sliderHeadMotion, els.valHeadMotion, "headMotionScale");
 bindAvatarSlider(els.sliderDepthScale, els.valDepthScale, "depthScale");
 bindAvatarSlider(els.sliderBlinkRate, els.valBlinkRate, "blinkRate");
+
+// Vtuber用スライダー＆スタイルイベント
+if (els.generateVtuberBtn) {
+  els.generateVtuberBtn.addEventListener("click", () => generateAndApplyVtuberAvatar());
+}
+
+if (els.avatarStyleBtn) {
+  els.avatarStyleBtn.addEventListener("click", () => {
+    const cur = avatarEngine?.settings?.avatarStyle || "vtuber";
+    const next = cur === "vtuber" ? "photomesh" : "vtuber";
+    syncAvatarStyleUI(next);
+    showToast(next === "vtuber" ? "🌟 Vtuberアバターモードに切り替えました" : "📸 リアル写真メッシュモードに切り替えました");
+  });
+}
+
+if (els.sliderAvatarStyle) {
+  els.sliderAvatarStyle.addEventListener("change", (e) => {
+    syncAvatarStyleUI(e.target.value);
+  });
+}
+
+if (els.vtuberStyleSelect) {
+  els.vtuberStyleSelect.addEventListener("change", (e) => {
+    syncAvatarStyleUI(e.target.value);
+  });
+}
+
+bindAvatarSlider(els.sliderVtuberCheek, els.valVtuberCheek, "vtuberCheek");
+bindAvatarSlider(els.sliderVtuberShine, els.valVtuberShine, "vtuberEyeShine");
 
 if (els.saveAvatarBtn) els.saveAvatarBtn.addEventListener("click", saveCurrentAvatar);
 if (els.deleteAvatarBtn) els.deleteAvatarBtn.addEventListener("click", deleteSelectedAvatar);

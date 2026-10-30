@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mirai Voice Studio｜AI人格クローン × リアル顔アバター対話</title>
+  <title>Mirai Voice Studio｜AI人格クローン × Vtuberアバター対話</title>
   <meta name="description" content="AIに人格をコピーし、顔写真から生成したリアルアバターとクローン音声でリアルタイムに対話できるスタジオ。">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -114,7 +114,7 @@
       <div id="panel-avatar" class="panel-content is-hidden">
         <div class="avatar-studio-header">
           <div>
-            <h3 class="studio-title">📸 顔写真からリアル2.5Dアバターを生成</h3>
+            <h3 class="studio-title">✨ 顔写真からVtuberアバターを自動生成</h3>
             <p class="studio-desc">
               <strong>正面の写真1枚だけ</strong>でもAIが478点の3D顔ランドマークと立体口内を自動生成します。<br>
               さらに「口を開けた写真」「笑顔の写真」も追加すると、発話時の表情テクスチャがより本物そっくりにブレンドされます。
@@ -189,6 +189,25 @@
               <button type="button" class="btn-text slot-clear-btn" data-slot="smile">クリア</button>
             </div>
           </div>
+        <!-- Vtuberアバター自動生成コントロール -->
+        <div class="vtuber-gen-banner">
+          <div class="vtuber-gen-info">
+            <span class="vtuber-badge">✨ AI VTUBER</span>
+            <strong>写真を基に、違和感のないVtuberアバターを自動生成！</strong>
+            <span class="vtuber-subtext">本人の特徴（髪型・メガネ・顔立ち）を忠実にアニメ調アバター化します</span>
+          </div>
+          <div class="vtuber-gen-actions">
+            <select id="vtuber-style-select" class="select-input vtuber-style-select" title="アバタースタイルを選択">
+              <option value="vtuber" selected>🌟 Vtuberアバター（Live2Dアニメ調・推奨）</option>
+              <option value="photomesh">📸 リアル写真メッシュ（従来のモード）</option>
+            </select>
+            <button id="generate-vtuber-btn" class="btn-primary btn-generate-vtuber" type="button">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-label">✨ 写真からVtuberアバターを生成</span>
+            </button>
+          </div>
+        </div>
+
         </div>
 
         <!-- ランドマーク微調整＆モーション設定 -->
@@ -206,6 +225,33 @@
 
           <div class="motion-sliders-box">
             <span class="field-label">🎛 モーション・立体感の調整（リアルタイム反映）</span>
+
+            <label class="slider-item">
+              <div class="slider-head">
+                <span>アバタースタイル</span>
+                <output id="val-avatar-style">Vtuber</output>
+              </div>
+              <select id="slider-avatar-style" class="select-input select-sm">
+                <option value="vtuber" selected>🌟 Vtuberアバター（推奨）</option>
+                <option value="photomesh">📸 リアル写真メッシュ</option>
+              </select>
+            </label>
+
+            <label class="slider-item">
+              <div class="slider-head">
+                <span>チーク血色感（かわいさ）</span>
+                <output id="val-vtuber-cheek">1.00x</output>
+              </div>
+              <input id="slider-vtuber-cheek" type="range" min="0.0" max="2.0" step="0.05" value="1.0">
+            </label>
+
+            <label class="slider-item">
+              <div class="slider-head">
+                <span>瞳のハイライト輝き</span>
+                <output id="val-vtuber-shine">1.20x</output>
+              </div>
+              <input id="slider-vtuber-shine" type="range" min="0.0" max="2.5" step="0.05" value="1.2">
+            </label>
 
             <label class="slider-item">
               <div class="slider-head">
@@ -330,6 +376,9 @@
           <span id="avatar-state-badge" class="avatar-state-badge">待機中</span>
         </div>
         <div class="avatar-toolbar">
+          <button id="avatar-style-btn" class="btn-chip btn-chip-style" type="button" title="Vtuber / リアル写真モードを切り替え">
+            🌟 Vtuber
+          </button>
           <button id="avatar-test-btn" class="btn-chip" type="button" title="口パクと表情のテスト動作">
             🗣 テスト発話
           </button>

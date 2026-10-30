@@ -1503,3 +1503,114 @@ body.is-avatar-fullscreen .fullscreen-chat-bar {
   background: hsl(352 85% 55% / 0.18);
   border-color: var(--danger);
 }
+
+
+/* ==========================================================================
+ * Vtuber Avatar Studio Styles
+ * 写真から生成するVtuberアバター用のモダンUI
+ * ========================================================================== */
+
+.vtuber-gen-banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(135deg, hsl(270 50% 16% / 0.85), hsl(210 50% 14% / 0.85));
+  border: 1px solid hsl(270 80% 65% / 0.4);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin: 6px 0 14px;
+  box-shadow: 0 4px 20px hsl(270 80% 40% / 0.15), inset 0 1px 0 hsl(270 100% 85% / 0.15);
+  flex-wrap: wrap;
+}
+
+.vtuber-gen-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.vtuber-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff5e98, #9b51e0);
+  color: #fff;
+  box-shadow: 0 2px 8px hsl(330 100% 60% / 0.35);
+  margin-bottom: 2px;
+}
+
+.vtuber-gen-info strong {
+  font-size: 0.94rem;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.vtuber-subtext {
+  font-size: 0.76rem;
+  color: hsl(270 20% 80%);
+}
+
+.vtuber-gen-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vtuber-style-select {
+  background: hsl(230 25% 10% / 0.85);
+  border: 1px solid hsl(270 50% 40% / 0.5);
+  color: #fff;
+  font-size: 0.82rem;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn-generate-vtuber {
+  background: linear-gradient(135deg, #e9407a, #8a3ffc) !important;
+  color: #fff !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  font-size: 0.86rem !important;
+  font-weight: 700 !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: 0 4px 16px hsl(315 90% 55% / 0.35) !important;
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+}
+
+.btn-generate-vtuber:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 6px 22px hsl(315 100% 60% / 0.5) !important;
+  filter: brightness(1.1);
+}
+
+.btn-chip-style {
+  background: linear-gradient(135deg, hsl(270 60% 25% / 0.8), hsl(330 60% 25% / 0.8)) !important;
+  border-color: hsl(290 80% 65% / 0.6) !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 10px hsl(290 80% 50% / 0.25);
+}
+
+.btn-chip-style:hover {
+  border-color: #ff5e98 !important;
+  box-shadow: 0 3px 14px hsl(330 100% 60% / 0.45);
+}
+
+.select-sm {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  background: hsl(230 25% 12% / 0.8);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+}
