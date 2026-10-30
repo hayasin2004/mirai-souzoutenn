@@ -33,6 +33,7 @@ const els = {
   avatarCanvas: $("avatar-canvas"),
   avatarStage: $("avatar-stage"),
   avatarStateBadge: $("avatar-state-badge"),
+  avatarStyleBtn: $("avatar-style-btn"),
   avatarTestBtn: $("avatar-test-btn"),
   avatarWireframeBtn: $("avatar-wireframe-btn"),
   openAvatarTabBtn: $("open-avatar-tab-btn"),
@@ -61,9 +62,17 @@ const els = {
   fileBase: $("file-base"),
   fileOpen: $("file-open"),
   fileSmile: $("file-smile"),
+  vtuberStyleSelect: $("vtuber-style-select"),
+  generateVtuberBtn: $("generate-vtuber-btn"),
   calibCanvas: $("calib-canvas"),
   redetectLandmarksBtn: $("redetect-landmarks-btn"),
   landmarkStatus: $("landmark-status"),
+  sliderAvatarStyle: $("slider-avatar-style"),
+  valAvatarStyle: $("val-avatar-style"),
+  sliderVtuberCheek: $("slider-vtuber-cheek"),
+  valVtuberCheek: $("val-vtuber-cheek"),
+  sliderVtuberShine: $("slider-vtuber-shine"),
+  valVtuberShine: $("val-vtuber-shine"),
   sliderMouthSens: $("slider-mouth-sens"),
   valMouthSens: $("val-mouth-sens"),
   sliderHeadMotion: $("slider-head-motion"),
@@ -1130,6 +1139,17 @@ async function applySelectedAvatar(avatarId) {
 function syncSlidersFromAvatar() {
   if (!avatarEngine) return;
   const s = avatarEngine.settings;
+  syncAvatarStyleUI(s.avatarStyle || "vtuber");
+  if (els.sliderVtuberCheek && s.vtuberCheek !== undefined) {
+    els.sliderVtuberCheek.value = s.vtuberCheek;
+    if (els.valVtuberCheek) els.valVtuberCheek.textContent = `${Number(s.vtuberCheek).toFixed(2)}x`;
+    setRangeFill(els.sliderVtuberCheek);
+  }
+  if (els.sliderVtuberShine && s.vtuberEyeShine !== undefined) {
+    els.sliderVtuberShine.value = s.vtuberEyeShine;
+    if (els.valVtuberShine) els.valVtuberShine.textContent = `${Number(s.vtuberEyeShine).toFixed(2)}x`;
+    setRangeFill(els.sliderVtuberShine);
+  }
   if (els.sliderMouthSens) {
     els.sliderMouthSens.value = s.mouthSensitivity;
     els.valMouthSens.textContent = `${Number(s.mouthSensitivity).toFixed(2)}x`;
