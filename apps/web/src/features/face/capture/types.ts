@@ -18,6 +18,4 @@ export type FrameSample = {
   /** そのフレームで実際に測ったか（ゆらぎの計算に使う） */
   metricsMeasured: boolean;
   cropOutsideRatio: number | null;
-  /** 肩から上の切り出しのはみ出し割合（正面の段階だけ測る） */
-  bustOutsideRatio?: number | null;
 };

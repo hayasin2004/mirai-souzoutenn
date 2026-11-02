@@ -18,8 +18,6 @@ export function qualityInputFromRecord(record: FaceRecord): QualityInput {
     meanLuminance: record.metrics.meanLuminance,
     laplacianVariance: record.metrics.laplacianVariance,
     cropOutsideRatio: record.crop.outsideRatio,
-    // 肩から上を作った記録（正面）だけ判定する
-    ...(record.bust ? { bustOutsideRatio: record.bust.outsideRatio } : {}),
   };
 }
 

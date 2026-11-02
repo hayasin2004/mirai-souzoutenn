@@ -1,4 +1,4 @@
-// MediaPipe の WASM とモデル（顔・人物の切り抜き）を public/mediapipe/ に置き、ネットなしで動くようにする。
+// MediaPipe の WASM とモデル（顔）を public/mediapipe/ に置き、ネットなしで動くようにする。
 //   node scripts/setup-mediapipe.mjs            WASM コピー + モデルが無ければダウンロード
 //   node scripts/setup-mediapipe.mjs --wasm-only WASM コピーのみ（postinstall 用。ネット不要）
 import { copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
@@ -15,11 +15,6 @@ const MODELS = [
     // 顔のランドマーク（478 点・ブレンドシェイプ・顔の向き）
     out: path.join(outDir, "face_landmarker.task"),
     url: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-  },
-  {
-    // 人物の切り抜き（背景・髪・肌・服などに分ける。肩から上の画像の背景を消すのに使う）
-    out: path.join(outDir, "selfie_multiclass_256x256.tflite"),
-    url: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite",
   },
 ];
 

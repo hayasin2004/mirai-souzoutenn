@@ -9,8 +9,6 @@ const FILES = {
   [FACE_FILES.face]: { column: "facePath", type: "image/png" },
   [FACE_FILES.original]: { column: "sourcePhotoPath", type: "image/jpeg" },
   [FACE_FILES.landmarks]: { column: "landmarksPath", type: "application/json; charset=utf-8" },
-  [FACE_FILES.bust]: { column: "bustPath", type: "image/png" },
-  [FACE_FILES.bustCutout]: { column: "bustCutoutPath", type: "image/png" },
 } as const;
 
 /** 保存した顔データを配信する。data/ は public/ の外にあるのでここを通す */

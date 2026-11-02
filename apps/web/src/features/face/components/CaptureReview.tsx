@@ -6,7 +6,6 @@ import type { StepOutcome } from "../capture/engine";
 import { type StepEvaluation, analyzeSession } from "../capture/session";
 import { toRecordedStepData } from "../capture/upload";
 import type { QualityLevel } from "../quality";
-import { BustPreview } from "./BustPreview";
 import { LevelBadge } from "./QualityReportView";
 
 export type ReviewItem =
@@ -19,7 +18,6 @@ export type ReviewItem =
       evaluation: StepEvaluation;
       faceUrl: string;
       videoUrl: string | null;
-      bustUrl: string | null;
     };
 
 type Props = {
@@ -127,14 +125,6 @@ export function CaptureReview({ items, overall, missing, saving, onRetake, onCon
           </li>
         ))}
       </ul>
-
-      {recorded
-        .filter((r) => r.bustUrl && r.outcome.keyframe.bust)
-        .map((r) => (
-          <div key={r.step.id} className="max-w-xs">
-            <BustPreview url={r.bustUrl!} personCoverage={r.outcome.keyframe.bust!.personCoverage} />
-          </div>
-        ))}
 
       {(summary.motionProfile || Object.keys(summary.expressionRange.peaks).length > 0) && (
         <div className="panel grid gap-4 p-4 sm:grid-cols-2">

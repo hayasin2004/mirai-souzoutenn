@@ -1,7 +1,6 @@
 "use client";
 
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
-import { type BustResult, renderBust, toBustRecord } from "./bust-render";
 import { PhotoAnalysisError, canvas2d, toBlob } from "./canvas";
 import { FACE_CONFIG, type FaceConfig } from "./config";
 import { type CropResult, computeCrop, metricsTransform, normalizeToCrop, toPixelLandmarks } from "./crop";
@@ -48,8 +47,6 @@ export type PhotoAnalysis = {
   originalJpeg: Blob;
   /** 512x512 の切り出し（顔が 1 つのときだけ） */
   facePng: Blob | null;
-  /** 肩から上の画像（顔が 1 つのときだけ） */
-  bust: BustResult | null;
   capturedAt: FaceRecord["capturedAt"];
 };
 
@@ -134,7 +131,6 @@ export function qualityOf(
   face: DetectedFace | null,
   config: FaceConfig = FACE_CONFIG,
   options: EvaluateOptions = {},
-  bust?: BustResult | null,
 ): QualityReport {
   return evaluateQuality(
     {
@@ -145,7 +141,6 @@ export function qualityOf(
       meanLuminance: face?.metrics.meanLuminance ?? null,
       laplacianVariance: face?.metrics.laplacianVariance ?? null,
       cropOutsideRatio: face?.crop.outsideRatio ?? null,
-      ...(bust ? { bustOutsideRatio: bust.crop.outsideRatio } : {}),
     },
     config.quality,
     options,
@@ -192,19 +187,15 @@ export async function analyzePhoto(file: File, config: FaceConfig = FACE_CONFIG)
 
   const raw = faceCount === 1 ? rawFromResult(result) : null;
   const face = raw ? buildDetectedFace(source, width, height, raw, config) : null;
-  const [facePng, bust] = face
-    ? await Promise.all([renderFacePng(source, face.crop, config), renderBust(source, width, height, face.landmarks, config)])
-    : [null, null];
-  const quality = qualityOf(faceCount, face, config, {}, bust);
+  const facePng = face ? await renderFacePng(source, face.crop, config) : null;
+  const quality = qualityOf(faceCount, face, config);
 
-  return { width, height, mimeType, faceCount, face, quality, originalJpeg, facePng, bust, capturedAt };
+  return { width, height, mimeType, faceCount, face, quality, originalJpeg, facePng, capturedAt };
 }
 
 /** 保存用の landmarks.json を組み立てる（顔が 1 つのときだけ） */
 export function toFaceRecord(
-  a: Pick<PhotoAnalysis, "width" | "height" | "mimeType" | "faceCount" | "face" | "quality" | "capturedAt"> & {
-    bust?: BustResult | null;
-  },
+  a: Pick<PhotoAnalysis, "width" | "height" | "mimeType" | "faceCount" | "face" | "quality" | "capturedAt">,
   config: FaceConfig = FACE_CONFIG,
   capture?: FaceRecord["capture"],
 ): FaceRecord | null {
@@ -235,7 +226,6 @@ export function toFaceRecord(
     },
     quality: a.quality,
     thresholds: config as unknown as Record<string, unknown>,
-    ...(a.bust ? { bust: toBustRecord(a.bust) } : {}),
     ...(capture ? { capture } : {}),
   };
 }

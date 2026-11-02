@@ -23,7 +23,6 @@ export const QUALITY_CHECK_IDS = [
   "brightness",
   "sharpness",
   "framing",
-  "bustFraming",
   // 動画の時間の流れで判定する項目（capture/temporal.ts）
   "motion",
   "faceLost",
@@ -62,8 +61,6 @@ export type QualityInput = {
   meanLuminance: number | null;
   laplacianVariance: number | null;
   cropOutsideRatio: number | null;
-  /** 肩から上の切り出しのはみ出し割合。undefined なら判定しない（一覧にも出さない） */
-  bustOutsideRatio?: number | null;
 };
 
 export function gradeMax(value: number, t: MaxThreshold): QualityLevel {
@@ -247,18 +244,6 @@ function evaluateAll(input: QualityInput, config: FaceConfig["quality"]): Qualit
     () => "顔が写真の端に寄っています。頭の上と首まで入るように、少し離れて顔を中央にして撮ってください。",
   );
 
-  // 8. 肩から上の切り出し（顔を動かす処理の元画像）
-  if (input.bustOutsideRatio !== undefined) {
-    add(
-      "bustFraming",
-      "肩まで写っているか",
-      v(input.bustOutsideRatio === null ? null : input.bustOutsideRatio * 100),
-      "%",
-      `はみ出し ${fmt(config.bustOutside.pass * 100)}% 以下`,
-      (x) => gradeMax(x / 100, config.bustOutside),
-      () => "肩が画面に入りきっていません。カメラから少し離れて、肩から上が画面の中央に入るようにしてください。",
-    );
-  }
 
   return checks;
 }

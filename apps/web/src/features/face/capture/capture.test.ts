@@ -139,6 +139,17 @@ describe("時間の判定", () => {
     expect(holdProgress(h, 1600, 1)).toBe(0);
   });
 
+  it("hold: graceMs 以内の途切れはリセットしない", () => {
+    let h = updateHold({ since: null }, true, 1000);
+    h = updateHold(h, false, 1200, 300);
+    expect(h.since).toBe(1000);
+    h = updateHold(h, true, 1250, 300);
+    h = updateHold(h, false, 1400, 300);
+    expect(h.since).toBe(1000);
+    h = updateHold(h, false, 1600, 300);
+    expect(h.since).toBeNull();
+  });
+
   it("countBlinks: 閉じて開いたら 1 回（閉じたままは数えない）", () => {
     const seq = [0.1, 0.6, 0.7, 0.2, 0.1, 0.8, 0.1, 0.9].map((v, i) =>
       sample(i * 33, { blendshapes: { eyeBlinkLeft: v, eyeBlinkRight: 0 } }),

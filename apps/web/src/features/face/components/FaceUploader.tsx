@@ -3,13 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ACCEPTED_TYPES, type PhotoAnalysis, PhotoAnalysisError, analyzePhoto, toFaceRecord } from "../analyze";
-import { BustPreview } from "./BustPreview";
 import { QualityReportView } from "./QualityReportView";
 
 type State =
   | { kind: "idle" }
   | { kind: "analyzing"; fileName: string }
-  | { kind: "result"; analysis: PhotoAnalysis; originalUrl: string; faceUrl: string | null; bustUrl: string | null }
+  | { kind: "result"; analysis: PhotoAnalysis; originalUrl: string; faceUrl: string | null }
   | { kind: "error"; message: string };
 
 export function FaceUploader({ personId }: { personId: string }) {
@@ -27,7 +26,6 @@ export function FaceUploader({ personId }: { personId: string }) {
     return () => {
       URL.revokeObjectURL(state.originalUrl);
       if (state.faceUrl) URL.revokeObjectURL(state.faceUrl);
-      if (state.bustUrl) URL.revokeObjectURL(state.bustUrl);
     };
   }, [state]);
 
@@ -43,7 +41,6 @@ export function FaceUploader({ personId }: { personId: string }) {
         analysis,
         originalUrl: URL.createObjectURL(analysis.originalJpeg),
         faceUrl: analysis.facePng ? URL.createObjectURL(analysis.facePng) : null,
-        bustUrl: analysis.bust ? URL.createObjectURL(analysis.bust.cutoutPng) : null,
       });
     } catch (err) {
       console.error(err);
@@ -66,10 +63,6 @@ export function FaceUploader({ personId }: { personId: string }) {
       form.append("original", analysis.originalJpeg, "original.jpg");
       form.append("face", analysis.facePng, "face.png");
       form.append("record", JSON.stringify(record));
-      if (analysis.bust) {
-        form.append("bust", analysis.bust.bustPng, "bust.png");
-        form.append("bustCutout", analysis.bust.cutoutPng, "bust_cutout.png");
-      }
       const res = await fetch(`/api/persons/${personId}/face`, { method: "POST", body: form });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
@@ -151,11 +144,6 @@ export function FaceUploader({ personId }: { personId: string }) {
                 )}
               </figure>
             </div>
-            {result.bustUrl && result.analysis.bust && (
-              <div className="max-w-xs">
-                <BustPreview url={result.bustUrl} personCoverage={result.analysis.bust.personCoverage} />
-              </div>
-            )}
             {result.analysis.face && (
               <dl className="grid grid-cols-3 gap-2 font-mono text-xs">
                 {(["yaw", "pitch", "roll"] as const).map((k) => (

@@ -24,28 +24,10 @@ export type FaceConfig = {
     luminance: RangeThreshold;
     sharpness: MinThreshold;
     cropOutside: MaxThreshold;
-    bustOutside: MaxThreshold;
   };
   metrics: { size: number; inset: number };
   crop: { outputSize: number; scale: number; centerOffsetY: number; background: string };
-  bust: BustConfig;
   capture: CaptureConfig;
-};
-
-/** 肩から上の画像（顔を動かす処理の元画像）の切り出し */
-export type BustConfig = {
-  outputWidth: number;
-  outputHeight: number;
-  /** 切り出しの高さ = 顔ランドマークの枠の高さ × この倍率。大きいほど肩・胸まで入る */
-  heightScale: number;
-  /** 顔の枠の上端から切り出しの上端までの余白（顔の高さに対する割合）。髪の分 */
-  topMargin: number;
-  /** はみ出した部分の色 */
-  background: string;
-  /** 背景の切り抜き。背景である確からしさを low〜high の間でなめらかに透明にする */
-  matte: { backgroundLow: number; backgroundHigh: number };
-  /** 切り抜いた人物が画像に占める割合がこれより小さいと「切り抜きに失敗」とみなす */
-  minPersonCoverage: number;
 };
 
 /** 品質チェックの項目 ID（quality.ts の QUALITY_CHECK_IDS と同じ） */
@@ -59,8 +41,7 @@ export type QualityCheckKey =
   | "mouthClosed"
   | "brightness"
   | "sharpness"
-  | "framing"
-  | "bustFraming";
+  | "framing";
 
 /** ブレンドシェイプの条件。names の平均が min 以上 */
 export type BlendshapeTarget = { names: string[]; min: number };
@@ -95,6 +76,8 @@ export type CaptureConfig = {
   videoBitsPerSecond: number;
   /** 輝度・ぶれの測定は重いので N フレームに 1 回 */
   metricsEveryNFrames: number;
+  /** 条件を満たさないフレームがこの時間（ms）以内なら、続けている時間をリセットしない（一瞬のゆらぎで撮り直しにならないように） */
+  holdGraceMs: number;
   /**
    * MediaPipe の顔の向き（pose.ts）と本人から見た向きの対応。
    * yaw が正 = 本人の左を向く、pitch が負 = 上を向く。実機で逆だったらここの符号を反転する。
@@ -120,30 +103,27 @@ export const FACE_CONFIG: FaceConfig = {
 
   quality: {
     /** 顔の向き（度, 絶対値）。yaw=左右, pitch=上下, roll=傾き（roll は切り出しで補正するので緩め） */
-    yawDeg: { pass: 10, fail: 15 },
-    pitchDeg: { pass: 10, fail: 15 },
-    rollDeg: { pass: 20, fail: 30 },
+    yawDeg: { pass: 12, fail: 20 },
+    pitchDeg: { pass: 12, fail: 20 },
+    rollDeg: { pass: 25, fail: 35 },
 
     /** 顔の幅（元画像のピクセル。傾きを補正した後のランドマークの幅） */
-    faceWidthPx: { pass: 256, fail: 200 },
+    faceWidthPx: { pass: 220, fail: 170 },
 
     /** 目の閉じ具合（eyeBlinkLeft / eyeBlinkRight の大きい方。0〜1） */
-    eyeBlink: { pass: 0.35, fail: 0.55 },
+    eyeBlink: { pass: 0.45, fail: 0.7 },
 
     /** 口の開き（jawOpen。0〜1） */
-    jawOpen: { pass: 0.15, fail: 0.3 },
+    jawOpen: { pass: 0.2, fail: 0.4 },
 
     /** 顔領域の平均輝度（0〜255） */
-    luminance: { passMin: 70, passMax: 190, failMin: 45, failMax: 220 },
+    luminance: { passMin: 60, passMax: 200, failMin: 35, failMax: 235 },
 
     /** 顔領域のラプラシアン分散（顔を metricsSize 四方に縮めてから計算。大きいほどくっきり） */
-    sharpness: { pass: 60, fail: 25 },
+    sharpness: { pass: 40, fail: 15 },
 
     /** 切り出し範囲のうち元画像の外にはみ出した割合（0〜1）。顔が端に寄りすぎていないか */
-    cropOutside: { pass: 0.02, fail: 1 },
-
-    /** 肩から上の切り出しのうち元画像の外にはみ出した割合（0〜1）。肩まで写っているか */
-    bustOutside: { pass: 0.05, fail: 1 },
+    cropOutside: { pass: 0.05, fail: 1 },
   },
 
   metrics: {
@@ -164,25 +144,16 @@ export const FACE_CONFIG: FaceConfig = {
     background: "#000000",
   },
 
-  bust: {
-    outputWidth: 1024,
-    outputHeight: 1024,
-    heightScale: 3.2,
-    topMargin: 0.6,
-    background: "#000000",
-    matte: { backgroundLow: 0.3, backgroundHigh: 0.7 },
-    minPersonCoverage: 0.12,
-  },
-
   capture: {
     camera: { width: 1920, height: 1080, frameRate: 30 },
     videoBitsPerSecond: 8_000_000,
     metricsEveryNFrames: 3,
+    holdGraceMs: 300,
     poseSign: { yawLeft: 1, pitchUp: -1 },
     motion: {
-      angularSpeedDegPerSec: { pass: 25, fail: 60 },
-      faceLostRatio: { pass: 0.05, fail: 0.3 },
-      luminanceStd: { pass: 6, fail: 15 },
+      angularSpeedDegPerSec: { pass: 40, fail: 80 },
+      faceLostRatio: { pass: 0.1, fail: 0.3 },
+      luminanceStd: { pass: 8, fail: 20 },
     },
     blink: { closeAbove: 0.5, openBelow: 0.3 },
     steps: [
@@ -200,7 +171,7 @@ export const FACE_CONFIG: FaceConfig = {
         instruction: "ゆっくり左を向いて、止まってください",
         kind: "pose",
         holdSec: 1,
-        pose: { direction: "left", minDeg: 15, maxDeg: 30 },
+        pose: { direction: "left", minDeg: 12, maxDeg: 35 },
         timeoutSec: 15,
         skipChecks: ["yaw", "framing"],
       },
@@ -210,7 +181,7 @@ export const FACE_CONFIG: FaceConfig = {
         instruction: "ゆっくり右を向いて、止まってください",
         kind: "pose",
         holdSec: 1,
-        pose: { direction: "right", minDeg: 15, maxDeg: 30 },
+        pose: { direction: "right", minDeg: 12, maxDeg: 35 },
         timeoutSec: 15,
         skipChecks: ["yaw", "framing"],
       },
@@ -220,7 +191,7 @@ export const FACE_CONFIG: FaceConfig = {
         instruction: "あごを少し上げて、止まってください",
         kind: "pose",
         holdSec: 1,
-        pose: { direction: "up", minDeg: 10, maxDeg: 25 },
+        pose: { direction: "up", minDeg: 8, maxDeg: 30 },
         timeoutSec: 15,
         skipChecks: ["pitch", "framing"],
       },
@@ -230,7 +201,7 @@ export const FACE_CONFIG: FaceConfig = {
         instruction: "あごを少し引いて、止まってください",
         kind: "pose",
         holdSec: 1,
-        pose: { direction: "down", minDeg: 10, maxDeg: 25 },
+        pose: { direction: "down", minDeg: 8, maxDeg: 30 },
         timeoutSec: 15,
         skipChecks: ["pitch", "eyesOpen", "framing"],
       },
@@ -240,7 +211,7 @@ export const FACE_CONFIG: FaceConfig = {
         instruction: "にっこり笑ってください",
         kind: "expression",
         holdSec: 1,
-        expression: { names: ["mouthSmileLeft", "mouthSmileRight"], min: 0.5 },
+        expression: { names: ["mouthSmileLeft", "mouthSmileRight"], min: 0.4 },
         timeoutSec: 12,
         skipChecks: ["eyesOpen", "mouthClosed"],
       },
@@ -250,7 +221,7 @@ export const FACE_CONFIG: FaceConfig = {
         instruction: "口を大きく「あー」と開けてください",
         kind: "expression",
         holdSec: 1,
-        expression: { names: ["jawOpen"], min: 0.45 },
+        expression: { names: ["jawOpen"], min: 0.35 },
         timeoutSec: 12,
         skipChecks: ["mouthClosed"],
       },
@@ -260,7 +231,7 @@ export const FACE_CONFIG: FaceConfig = {
         instruction: "口をすぼめて「うー」としてください",
         kind: "expression",
         holdSec: 1,
-        expression: { names: ["mouthPucker"], min: 0.5 },
+        expression: { names: ["mouthPucker"], min: 0.4 },
         timeoutSec: 12,
         skipChecks: ["mouthClosed"],
       },
@@ -270,8 +241,10 @@ export const FACE_CONFIG: FaceConfig = {
         instruction: "眉をぐっと上げてください",
         kind: "expression",
         holdSec: 1,
-        expression: { names: ["browInnerUp"], min: 0.5 },
+        // 前髪で眉が隠れると検出しにくい。この段階のデータは今は使っていないので省略できるようにする
+        expression: { names: ["browInnerUp"], min: 0.3 },
         timeoutSec: 12,
+        optional: true,
         skipChecks: ["eyesOpen", "mouthClosed"],
       },
       {

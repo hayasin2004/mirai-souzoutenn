@@ -58,9 +58,6 @@ export const avatarAssets = sqliteTable(
     sourcePhotoPath: text("source_photo_path").notNull(),
     facePath: text("face_path").notNull(),
     landmarksPath: text("landmarks_path").notNull(),
-    /** 肩から上の画像（顔を動かす処理の元画像）。背景つき / 背景を透明にしたもの。古いデータは null */
-    bustPath: text("bust_path"),
-    bustCutoutPath: text("bust_cutout_path"),
     /** 不合格は保存しないので pass / warn のみ */
     qualityStatus: text("quality_status", { enum: QUALITY_STATUSES }).notNull(),
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(false),

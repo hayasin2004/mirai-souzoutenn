@@ -13,8 +13,6 @@ const TYPES: Record<string, string> = {
   [STEP_FILES.landmarks]: "application/json; charset=utf-8",
   [STEP_FILES.timeline]: "application/json; charset=utf-8",
   [STEP_FILES.video]: "video/webm",
-  [STEP_FILES.bust]: "image/png",
-  [STEP_FILES.bustCutout]: "image/png",
 };
 
 const notFound = () => NextResponse.json({ error: "見つかりません" }, { status: 404 });

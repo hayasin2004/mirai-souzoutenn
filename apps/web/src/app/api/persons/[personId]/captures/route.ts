@@ -18,7 +18,7 @@ import {
   NotFoundError,
   saveCaptureSession,
 } from "@/features/face/server/repository";
-import { bytesOf, readBustFiles } from "@/features/face/server/form-files";
+import { bytesOf } from "@/features/face/server/form-files";
 import { ID_PATTERN } from "@/lib/paths";
 
 type Ctx = { params: Promise<{ personId: string }> };
@@ -47,7 +47,6 @@ function parseJson<T>(v: FormDataEntryValue | null, schema: z.ZodType<T>): T | n
  *   step:<id>:landmarks         landmarks.json（JSON 文字列）
  *   step:<id>:timeline          timeline.json（JSON 文字列）
  *   step:<id>:video             その段階の録画（WebM、任意）
- *   step:<id>:bust / bustCutout 肩から上の画像（正面の段階だけ）
  */
 export async function POST(req: Request, { params }: Ctx) {
   const { personId } = await params;
@@ -99,11 +98,6 @@ export async function POST(req: Request, { params }: Ctx) {
     if (!record || record.capture?.stepId !== s.id) return error(400, `「${step.label}」の landmarks の形式が不正です`);
     const timeline = parseJson(form.get(key("timeline")), timelineSchema);
     if (!timeline) return error(400, `「${step.label}」の timeline の形式が不正です`);
-    const bust =
-      step.kind === "front"
-        ? await readBustFiles(form, { bust: key("bust"), cutout: key("bustCutout") }, record, config)
-        : { files: null, error: null };
-    if (bust.error) return error(400, `「${step.label}」: ${bust.error}`);
 
     const data: RecordedStepData = {
       step,
@@ -127,7 +121,6 @@ export async function POST(req: Request, { params }: Ctx) {
       landmarksJson: JSON.stringify({ ...record, quality: ev.quality, thresholds: config }, null, 2),
       timelineJson: JSON.stringify(timeline),
       video,
-      bust: bust.files,
     });
   }
 

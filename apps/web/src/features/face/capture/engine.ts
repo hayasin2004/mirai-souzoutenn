@@ -14,8 +14,6 @@ import {
   toBlob,
   toFaceRecord,
 } from "../analyze";
-import { type BustResult, renderBust } from "../bust-render";
-import { computeBustCrop } from "../bust";
 import type { CaptureStep, FaceConfig } from "../config";
 import { computeCrop, toPixelLandmarks } from "../crop";
 import { poseFromTransformMatrix } from "../pose";
@@ -52,8 +50,6 @@ export type Keyframe = {
   quality: QualityReport;
   originalJpeg: Blob;
   facePng: Blob;
-  /** 肩から上の画像（正面の段階だけ） */
-  bust: BustResult | null;
   record: FaceRecord;
 };
 
@@ -257,9 +253,6 @@ export class CaptureEngine {
             laplacianVariance: lastMetrics?.sharp ?? null,
             metricsMeasured: measured,
             cropOutsideRatio: crop.outsideRatio,
-            ...(step.kind === "front"
-              ? { bustOutsideRatio: computeBustCrop(px, width, height, config.bust).outsideRatio }
-              : {}),
           };
         } else {
           sample = {
@@ -292,17 +285,18 @@ export class CaptureEngine {
         if (raw && quality.status !== "fail" && score > fallback.score) this.keep(fallback, raw, sample, score);
 
         const wasHolding = hold.since !== null;
-        hold = updateHold(hold, ok, t);
-        if (!ok) {
+        hold = updateHold(hold, ok, t, cap.holdGraceMs);
+        if (ok) {
+          if (!wasHolding) holdSamples = [];
+          holdSamples.push(sample);
+          if (raw && score > best.score) this.keep(best, raw, sample, score);
+        } else if (hold.since === null) {
           holdSamples = [];
           best.score = -Infinity;
           best.raw = null;
           best.sample = null;
-        } else {
-          if (!wasHolding) holdSamples = [];
-          holdSamples.push(sample);
-          if (raw && score > best.score) this.keep(best, raw, sample, score);
         }
+        // ok でなくても hold が続いているとき（一瞬だけ外れた）は、時間は保つが記録の候補にはしない
 
         const progress = holdProgress(hold, t, step.holdSec);
         const timedOut = step.timeoutSec !== undefined && t > step.timeoutSec * 1000;
@@ -344,13 +338,11 @@ export class CaptureEngine {
     const raw = cand.raw!;
     const sample = cand.sample!;
     const face = buildDetectedFace(canvas, canvas.width, canvas.height, raw, this.config, this.metricsCtx);
-    // 正面は顔を動かす処理の元画像になるので、肩から上も作る
-    const [originalJpeg, facePng, bust] = await Promise.all([
+    const [originalJpeg, facePng] = await Promise.all([
       toBlob(canvas, "image/jpeg", 0.95),
       renderFacePng(canvas, face.crop, this.config),
-      step.kind === "front" ? renderBust(canvas, canvas.width, canvas.height, raw.landmarks, this.config) : null,
     ]);
-    const quality = qualityOf(1, face, this.config, { skip: step.skipChecks ?? [] }, bust);
+    const quality = qualityOf(1, face, this.config, { skip: step.skipChecks ?? [] });
     const record = toFaceRecord(
       {
         width: canvas.width,
@@ -360,13 +352,12 @@ export class CaptureEngine {
         face,
         quality,
         capturedAt: { value: new Date().toISOString(), source: "camera" },
-        bust,
       },
       this.config,
       { stepId: step.id, kind: step.kind, frameTimeMs: sample.t },
     );
     if (!record) throw new Error("記録を作れませんでした");
-    return { t: sample.t, width: canvas.width, height: canvas.height, face, quality, originalJpeg, facePng, bust, record };
+    return { t: sample.t, width: canvas.width, height: canvas.height, face, quality, originalJpeg, facePng, record };
   }
 
   private drawOverlay(raw: RawDetection | null, ok: boolean) {

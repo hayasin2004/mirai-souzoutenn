@@ -20,12 +20,12 @@
 
 | 項目 | 内容 |
 |---|---|
-| `source` | 動かす元画像。**肩から上・背景は黒**の PNG（既定 1024×1024） |
-| `landmarks` | `landmarks.json` の中身（任意）。`bust.landmarks` に元画像に対する 478 点（0〜1） |
+| `source` | 動かす元画像。**顔の切り出し（face.png）**の PNG（512×512） |
+| `landmarks` | `landmarks.json` の中身（任意）。`crop.landmarks` に元画像に対する 478 点（0〜1） |
 | `assetId` | 展示PC 側の写真 ID。同じ ID なら特徴量を使い回してよい |
 
 ```json
-{ "sourceId": "f91bf1c5…", "width": 1024, "height": 1024 }
+{ "sourceId": "f91bf1c5…", "width": 512, "height": 512 }
 ```
 
 ### `POST /speak?sourceId=…&fps=25`（本文：`audio/wav`）

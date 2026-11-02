@@ -5,7 +5,7 @@
  * - RemoteFaceRenderer: PC-A の Python サービス（services/face-renderer。Ditto + LivePortrait）につなぐ
  *
  * 流れ:
- *   1. prepare(asset)   使用中の顔（肩から上の画像）を読み込む。リモート実装ではサービスへ送り、
+ *   1. prepare(asset)   使用中の顔（512 の顔画像）を読み込む。リモート実装ではサービスへ送り、
  *                       特徴量を作らせておく。
  *   2. speak(audio)     声のサービス（PC-A）が返した WAV を渡すと、口の動きに合わせた映像を
  *                       VideoFrame として順に返す。各フレームの timestamp（マイクロ秒）は
@@ -24,9 +24,6 @@ export type AvatarAssetDescriptor = {
   faceUrl: string;
   /** landmarks.json の URL */
   landmarksUrl: string;
-  /** 肩から上（背景つき） / 背景を透明にしたもの。古いデータには無い */
-  bustUrl: string | null;
-  bustCutoutUrl: string | null;
 };
 
 /** 声のサービスが返す音声。WAV（RIFF/PCM）をそのまま渡す */
@@ -56,24 +53,11 @@ export class RendererNotPreparedError extends Error {
   }
 }
 
-/**
- * 顔を動かす元画像を作る。肩から上の切り抜きがあれば黒背景に重ね（ホログラム表示に合わせる）、
- * 無ければ 512 の顔画像を使う。
- */
+/** 顔を動かす元画像（512 の顔画像）を読み込む */
 export async function loadSourceImage(asset: AvatarAssetDescriptor, signal?: AbortSignal): Promise<ImageBitmap> {
-  const url = asset.bustCutoutUrl ?? asset.faceUrl;
-  const res = await fetch(url, { signal, cache: "no-store" });
+  const res = await fetch(asset.faceUrl, { signal, cache: "no-store" });
   if (!res.ok) throw new Error(`顔画像を読み込めません（${res.status}）`);
-  const img = await createImageBitmap(await res.blob());
-  if (!asset.bustCutoutUrl) return img;
-  const canvas = new OffscreenCanvas(img.width, img.height);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas を使えません");
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, img.width, img.height);
-  ctx.drawImage(img, 0, 0);
-  img.close();
-  return canvas.transferToImageBitmap();
+  return createImageBitmap(await res.blob());
 }
 
 /**

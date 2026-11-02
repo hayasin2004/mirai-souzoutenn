@@ -4,7 +4,7 @@ import { type QualityReport, evaluateQuality } from "../quality";
 import type { FrameSample } from "./types";
 
 /** 主な向き以外の軸（左右を向く段階なら上下）のずれの許容（度） */
-export const OFF_AXIS_MAX_DEG = 12;
+export const OFF_AXIS_MAX_DEG = 18;
 
 /** 本人から見た向き（度）。left が正 = 本人の左を向いている, up が正 = 上を向いている */
 export function subjectPose(pose: HeadPose, sign: CaptureConfig["poseSign"]): { left: number; up: number } {
@@ -77,7 +77,6 @@ export function frameQuality(step: CaptureStep, sample: FrameSample, config: Fac
       meanLuminance: sample.meanLuminance,
       laplacianVariance: sample.laplacianVariance,
       cropOutsideRatio: sample.cropOutsideRatio,
-      ...(sample.bustOutsideRatio !== undefined ? { bustOutsideRatio: sample.bustOutsideRatio } : {}),
     },
     config.quality,
     { skip: step.skipChecks ?? [] },

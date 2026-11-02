@@ -71,24 +71,6 @@ export const faceRecordSchema = z.object({
   quality: qualityReportSchema,
   /** 判定に使ったしきい値（config.ts のスナップショット） */
   thresholds: z.record(z.string(), z.unknown()),
-  /**
-   * 肩から上の画像（顔を動かす処理の元画像 bust.png / bust_cutout.png）。正面の顔だけ。
-   * landmarks は肩から上の画像に対する 0〜1（z は幅基準）。
-   */
-  bust: z
-    .object({
-      width: z.number().int().positive(),
-      height: z.number().int().positive(),
-      /** 元画像の中で切り出した範囲（ピクセル。はみ出すこともある） */
-      sourceRect: z.object({ x: finite, y: finite, width: finite.positive(), height: finite.positive() }),
-      /** 元画像のピクセル → 肩から上の画像のピクセル */
-      transform: z.tuple([finite, finite, finite, finite, finite, finite]),
-      outsideRatio: finite.min(0).max(1),
-      /** 切り抜いた人物が画像に占める割合 */
-      personCoverage: finite.min(0).max(1),
-      landmarks: z.array(point3).length(LANDMARK_COUNT),
-    })
-    .optional(),
   /** カメラで撮ったキーフレームのとき：どの段階の、段階開始から何 ms のフレームか */
   capture: z
     .object({

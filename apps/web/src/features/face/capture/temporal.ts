@@ -50,12 +50,16 @@ export function angularSpeeds(samples: readonly FrameSample[], spanMs = 150): (n
   return out;
 }
 
-/** 条件を満たし続けている時間を数える。満たさないフレームが来たらリセット */
-export type HoldState = { since: number | null };
+/**
+ * 条件を満たし続けている時間を数える。満たさないフレームが graceMs より長く続いたらリセット。
+ * lastOk = 最後に条件を満たしたフレームの時刻
+ */
+export type HoldState = { since: number | null; lastOk?: number };
 
-export function updateHold(state: HoldState, ok: boolean, t: number): HoldState {
-  if (!ok) return { since: null };
-  return { since: state.since ?? t };
+export function updateHold(state: HoldState, ok: boolean, t: number, graceMs = 0): HoldState {
+  if (ok) return { since: state.since ?? t, lastOk: t };
+  if (state.since !== null && state.lastOk !== undefined && t - state.lastOk <= graceMs) return state;
+  return { since: null };
 }
 
 export function holdProgress(state: HoldState, t: number, holdSec: number): number {

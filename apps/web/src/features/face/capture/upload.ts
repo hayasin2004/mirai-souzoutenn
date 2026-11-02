@@ -53,10 +53,6 @@ export function buildCaptureForm(
     form.append(key("landmarks"), JSON.stringify(o.keyframe.record));
     form.append(key("timeline"), JSON.stringify(encodeTimeline(o.samples)));
     if (o.video) form.append(key("video"), o.video, "clip.webm");
-    if (o.keyframe.bust) {
-      form.append(key("bust"), o.keyframe.bust.bustPng, "bust.png");
-      form.append(key("bustCutout"), o.keyframe.bust.cutoutPng, "bust_cutout.png");
-    }
   }
 
   const analysis = analyzeSession(recorded, config);

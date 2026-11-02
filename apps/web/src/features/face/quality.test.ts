@@ -72,19 +72,19 @@ describe("evaluateQuality", () => {
     expect(r.checks.find((c) => c.id === "faceCount")?.tip).toMatch(/複数/);
   });
 
-  it("横向き: 12° は注意、20° は不合格（符号は問わない）", () => {
-    expect(levelOf({ ...GOOD, pose: { yaw: 12, pitch: 0, roll: 0 } }, "yaw")).toBe("warn");
-    expect(levelOf({ ...GOOD, pose: { yaw: -20, pitch: 0, roll: 0 } }, "yaw")).toBe("fail");
-    expect(evaluateQuality({ ...GOOD, pose: { yaw: -20, pitch: 0, roll: 0 } }).status).toBe("fail");
+  it("横向き: 15° は注意、25° は不合格（符号は問わない）", () => {
+    expect(levelOf({ ...GOOD, pose: { yaw: 15, pitch: 0, roll: 0 } }, "yaw")).toBe("warn");
+    expect(levelOf({ ...GOOD, pose: { yaw: -25, pitch: 0, roll: 0 } }, "yaw")).toBe("fail");
+    expect(evaluateQuality({ ...GOOD, pose: { yaw: -25, pitch: 0, roll: 0 } }).status).toBe("fail");
   });
 
   it("上下の向きも判定する", () => {
-    expect(levelOf({ ...GOOD, pose: { yaw: 0, pitch: -18, roll: 0 } }, "pitch")).toBe("fail");
+    expect(levelOf({ ...GOOD, pose: { yaw: 0, pitch: -23, roll: 0 } }, "pitch")).toBe("fail");
   });
 
-  it("roll は補正するので 20° までは合格", () => {
-    expect(levelOf({ ...GOOD, pose: { yaw: 0, pitch: 0, roll: 19 } }, "roll")).toBe("pass");
-    expect(levelOf({ ...GOOD, pose: { yaw: 0, pitch: 0, roll: 35 } }, "roll")).toBe("fail");
+  it("roll は補正するので 25° までは合格", () => {
+    expect(levelOf({ ...GOOD, pose: { yaw: 0, pitch: 0, roll: 24 } }, "roll")).toBe("pass");
+    expect(levelOf({ ...GOOD, pose: { yaw: 0, pitch: 0, roll: 40 } }, "roll")).toBe("fail");
   });
 
   it("顔が小さいと不合格", () => {
@@ -119,7 +119,7 @@ describe("evaluateQuality", () => {
   });
 
   it("注意だけなら全体も注意", () => {
-    expect(evaluateQuality({ ...GOOD, pose: { yaw: 12, pitch: 0, roll: 0 } }).status).toBe("warn");
+    expect(evaluateQuality({ ...GOOD, pose: { yaw: 15, pitch: 0, roll: 0 } }).status).toBe("warn");
   });
 
   it("しきい値を差し替えられる", () => {

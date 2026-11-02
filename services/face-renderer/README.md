@@ -1,6 +1,6 @@
 # 顔を動かすサービス（PC-A）
 
-展示PC から「肩から上の写真」と「声の WAV」を受け取り、しゃべる顔の映像をフレームの列で返す FastAPI サービス。
+展示PC から「顔の写真（512×512 の切り出し）」と「声の WAV」を受け取り、しゃべる顔の映像をフレームの列で返す FastAPI サービス。
 やり取りの形式は [PROTOCOL.md](PROTOCOL.md)。
 
 ## 今の状態
@@ -36,7 +36,7 @@ NEXT_PUBLIC_FACE_RENDERER_URL=http://<PC-AのIP>:8000
 
 1. **環境**：NVIDIA GPU（RTX 30 系以上を目安）、CUDA、TensorRT。Ditto は Linux 前提なので、Windows なら WSL2 か Linux。
 2. **単体で動かす**：Ditto（antgroup/ditto-talkinghead）の手順どおりにモデルを入れ、
-   展示PC で保存した `bust.png`（`data/persons/<id>/face/<sessionId>/front/`）を黒背景にしたものと
+   展示PC で保存した `face.png`（`data/persons/<id>/face/<sessionId>/front/`）と
    手元の WAV で、オフラインで動画を作る。ここで次を測る:
    - 1 秒の音声の映像を作るのにかかる時間（**1 秒未満**でないとリアルタイムで流せない）
    - 最初のフレームができるまでの時間

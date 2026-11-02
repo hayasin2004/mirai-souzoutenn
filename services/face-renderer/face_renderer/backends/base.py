@@ -30,7 +30,7 @@ class FaceBackend(Protocol):
     name: str
 
     def prepare(self, source_png: bytes, landmarks: dict[str, Any] | None, asset_id: str | None) -> PreparedSource:
-        """元画像（肩から上・黒背景の PNG）を受け取り、動かす準備をする。
+        """元画像（512×512 の顔の切り出し PNG）を受け取り、動かす準備をする。
 
         同じ asset_id なら、前に作った特徴量を使い回してよい。
         """

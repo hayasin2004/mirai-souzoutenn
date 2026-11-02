@@ -4,7 +4,7 @@
  *
  *   GET  {base}/health                         → JSON { status: "ok", backend, version }
  *   POST {base}/prepare   (multipart)          → JSON { sourceId, width, height }
- *          source   : 元画像（PNG。肩から上、背景は黒）
+ *          source   : 元画像（PNG。512×512 の顔の切り出し）
  *          landmarks: landmarks.json（任意）
  *          assetId  : 展示PC側の写真 ID（同じ ID ならキャッシュを使ってよい）
  *   POST {base}/speak?sourceId=..&fps=..  (body: audio/wav) → フレームの列（下記）

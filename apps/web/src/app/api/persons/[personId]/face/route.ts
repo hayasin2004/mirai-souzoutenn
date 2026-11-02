@@ -12,7 +12,6 @@ import {
   getPerson,
   saveFaceAsset,
 } from "@/features/face/server/repository";
-import { readBustFiles } from "@/features/face/server/form-files";
 import { ID_PATTERN } from "@/lib/paths";
 
 type Ctx = { params: Promise<{ personId: string }> };
@@ -44,8 +43,6 @@ export async function GET(_req: Request, { params }: Ctx) {
           assetId: active.id,
           faceUrl: `/api/face-assets/${active.id}/face.png`,
           landmarksUrl: `/api/face-assets/${active.id}/landmarks.json`,
-          bustUrl: active.bustPath ? `/api/face-assets/${active.id}/bust.png` : null,
-          bustCutoutUrl: active.bustCutoutPath ? `/api/face-assets/${active.id}/bust_cutout.png` : null,
         }
       : null,
   });
@@ -84,8 +81,6 @@ export async function POST(req: Request, { params }: Ctx) {
   if (!size || size.width !== expected || size.height !== expected) {
     return error(400, `切り出し画像は ${expected}×${expected} の PNG が必要です`);
   }
-  const bust = await readBustFiles(formData, { bust: "bust", cutout: "bustCutout" }, record, FACE_CONFIG);
-  if (bust.error) return error(400, bust.error);
 
   try {
     const asset = await saveFaceAsset({
@@ -93,7 +88,6 @@ export async function POST(req: Request, { params }: Ctx) {
       originalJpeg: original,
       facePng: face,
       landmarksJson: JSON.stringify({ ...record, quality, thresholds: FACE_CONFIG }, null, 2),
-      bust: bust.files,
       qualityStatus: quality.status,
     });
     return NextResponse.json({ asset, quality }, { status: 201 });

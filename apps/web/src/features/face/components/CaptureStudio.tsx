@@ -21,11 +21,11 @@ type Phase =
   | { kind: "review" }
   | { kind: "error"; message: string };
 
-type Item = { outcome: StepOutcome; faceUrl: string | null; videoUrl: string | null; bustUrl: string | null };
+type Item = { outcome: StepOutcome; faceUrl: string | null; videoUrl: string | null };
 
 function revokeItem(it: Item | undefined) {
   if (!it) return;
-  for (const url of [it.faceUrl, it.videoUrl, it.bustUrl]) if (url) URL.revokeObjectURL(url);
+  for (const url of [it.faceUrl, it.videoUrl]) if (url) URL.revokeObjectURL(url);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -123,7 +123,6 @@ export function CaptureStudio({ personId }: { personId: string }) {
         outcome,
         faceUrl: rec ? URL.createObjectURL(rec.keyframe.facePng) : null,
         videoUrl: rec?.video ? URL.createObjectURL(rec.video) : null,
-        bustUrl: rec?.keyframe.bust ? URL.createObjectURL(rec.keyframe.bust.cutoutPng) : null,
       });
       return next;
     });
@@ -215,7 +214,6 @@ export function CaptureStudio({ personId }: { personId: string }) {
       evaluation: ev,
       faceUrl: it.faceUrl!,
       videoUrl: it.videoUrl,
-      bustUrl: it.bustUrl,
     };
   });
   const recordedIds = new Set(review.filter((r) => r.state === "recorded").map((r) => r.step.id));

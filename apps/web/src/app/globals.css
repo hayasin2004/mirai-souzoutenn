@@ -179,32 +179,3 @@
   }
 }
 
-/* 肩から上の切り抜き：下端（胸のあたり）を背景に溶かす */
-@layer components {
-  .holo-bust {
-    object-fit: contain;
-    mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
-    filter: saturate(0.85) contrast(1.04) brightness(1.03);
-  }
-  /* 呼吸：肩を支点に、ごくわずかに拡大縮小する */
-  .holo-breathe {
-    transform-origin: 50% 100%;
-    animation: holo-breathe 4.6s ease-in-out infinite;
-  }
-}
-
-@keyframes holo-breathe {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  45% {
-    transform: scale(1.006) translateY(-0.15%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .holo-breathe {
-    animation: none;
-  }
-}

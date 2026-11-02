@@ -1,7 +1,6 @@
 "use client";
 
 import { type Ref, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore } from "react";
-import { FACE_CONFIG } from "../config";
 import { type FaceConnections, loadFaceConnections, playDisperse, playScan } from "../effects";
 import type { AvatarAssetDescriptor } from "../renderer";
 
@@ -10,8 +9,6 @@ type Point = readonly [number, number, number];
 type LoadedFace = {
   asset: AvatarAssetDescriptor;
   name: string;
-  /** bust = 肩から上の切り抜き（顔を動かす元画像と同じ）, face = 512 の顔の切り出し（古いデータ） */
-  mode: "bust" | "face";
   imageUrl: string;
   /** 表示する画像に対する 0〜1 */
   landmarks: Point[];
@@ -60,11 +57,10 @@ async function loadFace(personId: string, signal: AbortSignal): Promise<LoadedFa
   const body = (await res.json()) as ActiveResponse;
   if (!body.active) return null;
   const asset: AvatarAssetDescriptor = { personId, ...body.active };
-  const mode = asset.bustCutoutUrl ? "bust" : "face";
-  const imageUrl = asset.bustCutoutUrl ?? asset.faceUrl;
+  const imageUrl = asset.faceUrl;
   const [record] = await Promise.all([
     fetch(asset.landmarksUrl, { signal, cache: "no-store" }).then(
-      (r) => r.json() as Promise<{ crop: { landmarks: Point[] }; bust?: { landmarks: Point[] } }>,
+      (r) => r.json() as Promise<{ crop: { landmarks: Point[] } }>,
     ),
     // 表示前に画像を読み終えておく（切替の途中で空白にならないように）
     new Promise<void>((resolve, reject) => {
@@ -74,8 +70,7 @@ async function loadFace(personId: string, signal: AbortSignal): Promise<LoadedFa
       img.src = imageUrl;
     }),
   ]);
-  const landmarks = mode === "bust" && record.bust ? record.bust.landmarks : record.crop.landmarks;
-  return { asset, name: body.person.name, mode, imageUrl, landmarks };
+  return { asset, name: body.person.name, imageUrl, landmarks: record.crop.landmarks };
 }
 
 /** 顔の輪郭（FACE_OVAL）を SVG のパスにする */
@@ -103,7 +98,6 @@ export type FaceDisplayProps = {
  * - 輪郭のうっすらした発光・細い走査線・わずかなちらつき
  * - 表示するとき、ランドマークの点と線が 0.6 秒で顔の上を走って消える
  * - 人物を切り替えると、前の顔が粒子になってばらけ、次の顔に変わる
- * - 肩から上の画像があれば、ゆっくり呼吸しているように少しだけ拡大縮小する
  * - しゃべるときは ref の setSpeaking(true) で、speechCanvas に描いた映像に切り替える
  * - prefers-reduced-motion のときは動く演出をすべて止める
  */
@@ -202,17 +196,15 @@ export function FaceDisplay({ personId, className = "", onShown, ref }: FaceDisp
   }, [personId, reducedMotion]);
 
   const animated = !reducedMotion;
-  const bust = FACE_CONFIG.bust;
-  const aspect = face?.mode === "bust" ? `${bust.outputWidth} / ${bust.outputHeight}` : "1 / 1";
 
   return (
     <div
       className={`holo-frame relative select-none ${animated ? "holo-animated" : ""} ${className}`}
-      style={{ aspectRatio: aspect }}
+      style={{ aspectRatio: "1 / 1" }}
     >
       {face && (
         <div
-          className={`absolute inset-0 transition-opacity ease-out ${animated && face.mode === "bust" ? "holo-breathe" : ""}`}
+          className="absolute inset-0 transition-opacity ease-out"
           style={{
             opacity: appearing ? 0 : 1,
             transitionDuration: animated ? `${APPEAR_MS}ms` : "0ms",
@@ -223,12 +215,12 @@ export function FaceDisplay({ personId, className = "", onShown, ref }: FaceDisp
             src={face.imageUrl}
             alt={`${face.name} の顔`}
             draggable={false}
-            className={`${face.mode === "bust" ? "holo-bust" : "holo-face"} absolute inset-0 size-full`}
+            className="holo-face absolute inset-0 size-full"
             style={{ opacity: speaking ? 0 : 1 }}
           />
           <canvas
             ref={speechRef}
-            className="holo-bust pointer-events-none absolute inset-0 size-full"
+            className="holo-face pointer-events-none absolute inset-0 size-full"
             style={{ opacity: speaking ? 1 : 0 }}
             aria-hidden
           />

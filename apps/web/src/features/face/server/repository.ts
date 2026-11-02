@@ -19,12 +19,7 @@ export const FACE_FILES = {
   original: "original.jpg",
   face: "face.png",
   landmarks: "landmarks.json",
-  /** 肩から上（背景つき）と、背景を透明にしたもの。顔を動かす処理の元画像 */
-  bust: "bust.png",
-  bustCutout: "bust_cutout.png",
 } as const;
-
-export type BustFiles = { bustPng: Uint8Array; cutoutPng: Uint8Array };
 
 /** カメラ撮影の各段階のフォルダに入るファイル */
 export const STEP_FILES = {
@@ -136,7 +131,6 @@ export async function saveFaceAsset(input: {
   originalJpeg: Uint8Array;
   facePng: Uint8Array;
   landmarksJson: string;
-  bust: BustFiles | null;
   qualityStatus: StoredQualityStatus;
 }): Promise<AvatarAsset> {
   const person = getPerson(input.personId);
@@ -154,8 +148,6 @@ export async function saveFaceAsset(input: {
       writeFile(path.join(/*turbopackIgnore: true*/ absDir, FACE_FILES.original), input.originalJpeg),
       writeFile(path.join(/*turbopackIgnore: true*/ absDir, FACE_FILES.face), input.facePng),
       writeFile(path.join(/*turbopackIgnore: true*/ absDir, FACE_FILES.landmarks), input.landmarksJson, "utf8"),
-      input.bust && writeFile(path.join(/*turbopackIgnore: true*/ absDir, FACE_FILES.bust), input.bust.bustPng),
-      input.bust && writeFile(path.join(/*turbopackIgnore: true*/ absDir, FACE_FILES.bustCutout), input.bust.cutoutPng),
     ]);
     return getDb().transaction((tx) => {
       tx.update(avatarAssets).set({ isActive: false }).where(eq(avatarAssets.personId, input.personId)).run();
@@ -167,8 +159,6 @@ export async function saveFaceAsset(input: {
           sourcePhotoPath: rel(FACE_FILES.original),
           facePath: rel(FACE_FILES.face),
           landmarksPath: rel(FACE_FILES.landmarks),
-          bustPath: input.bust ? rel(FACE_FILES.bust) : null,
-          bustCutoutPath: input.bust ? rel(FACE_FILES.bustCutout) : null,
           qualityStatus: input.qualityStatus,
           isActive: true,
         })
@@ -211,8 +201,6 @@ export type CaptureStepFiles = {
   landmarksJson: string;
   timelineJson: string;
   video: Uint8Array | null;
-  /** 正面の段階だけ */
-  bust: BustFiles | null;
 };
 
 /**
@@ -237,7 +225,6 @@ export async function saveCaptureSession(input: {
   const relDir = faceAssetRelDir(input.personId, sessionId);
   const absDir = resolveDataPath(relDir);
   const rel = (...parts: string[]) => path.posix.join(relDir, ...parts);
-  const frontBust = input.steps.find((s) => s.stepId === input.frontStepId)?.bust ?? null;
 
   await mkdir(absDir, { recursive: true });
   try {
@@ -250,8 +237,6 @@ export async function saveCaptureSession(input: {
         writeFile(path.join(/*turbopackIgnore: true*/ stepDir, STEP_FILES.landmarks), step.landmarksJson, "utf8"),
         writeFile(path.join(/*turbopackIgnore: true*/ stepDir, STEP_FILES.timeline), step.timelineJson, "utf8"),
         step.video ? writeFile(path.join(/*turbopackIgnore: true*/ stepDir, STEP_FILES.video), step.video) : null,
-        step.bust && writeFile(path.join(/*turbopackIgnore: true*/ stepDir, STEP_FILES.bust), step.bust.bustPng),
-        step.bust && writeFile(path.join(/*turbopackIgnore: true*/ stepDir, STEP_FILES.bustCutout), step.bust.cutoutPng),
       ]);
     }
     await writeFile(path.join(/*turbopackIgnore: true*/ absDir, SESSION_FILE), input.sessionJson, "utf8");
@@ -280,8 +265,6 @@ export async function saveCaptureSession(input: {
           sourcePhotoPath: rel(input.frontStepId, STEP_FILES.original),
           facePath: rel(input.frontStepId, STEP_FILES.face),
           landmarksPath: rel(input.frontStepId, STEP_FILES.landmarks),
-          bustPath: frontBust ? rel(input.frontStepId, STEP_FILES.bust) : null,
-          bustCutoutPath: frontBust ? rel(input.frontStepId, STEP_FILES.bustCutout) : null,
           qualityStatus: input.frontQualityStatus,
           isActive: true,
         })
@@ -293,9 +276,4 @@ export async function saveCaptureSession(input: {
     await rm(absDir, { recursive: true, force: true });
     throw err;
   }
-}
-
-/** 後から作った肩から上の画像を登録する */
-export function setAssetBust(assetId: string, bustPath: string, bustCutoutPath: string): void {
-  getDb().update(avatarAssets).set({ bustPath, bustCutoutPath }).where(eq(avatarAssets.id, assetId)).run();
 }

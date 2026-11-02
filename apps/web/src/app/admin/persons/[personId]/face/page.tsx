@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { BustBackfillButton } from "@/features/face/components/BustBackfillButton";
 import { CaptureStudio } from "@/features/face/components/CaptureStudio";
 import { FaceUploader } from "@/features/face/components/FaceUploader";
 import { LevelBadge } from "@/features/face/components/QualityReportView";
@@ -103,13 +102,6 @@ export default async function PersonFacePage({ params }: { params: Promise<{ per
                 <p className="font-mono text-xs text-holo">● 使用中</p>
               ) : (
                 <ActivateAssetButton personId={person.id} assetId={a.id} />
-              )}
-              {a.bustCutoutPath ? (
-                <a href={`/api/face-assets/${a.id}/bust_cutout.png`} className="block text-xs text-ink-dim hover:text-holo">
-                  肩から上 ✓
-                </a>
-              ) : (
-                person.consentAt && <BustBackfillButton assetId={a.id} />
               )}
             </li>
           ))}
