@@ -76,3 +76,57 @@ python voice_clone.py delete tako
 - 自分の声、または本人の同意を得た声だけを使ってください。他人の声を無断で使うと、肖像権・パブリシティ権や詐欺などの問題になります。
 - モデルは `private`（自分だけが使える）で作成しています。
 - `.env` と `voices.json` は Git に上げないでください。
+
+---
+
+# 自分の分身アバター（fal.ai / Kling AI Avatar v2）
+
+正面の顔写真 1 枚と音声から、声に合わせて口・表情・頭が動く動画（mp4）を作る `avatar.py`。
+声は上の `voice_clone.py` のものをそのまま使える。（調査日: 2026-11-02）
+
+```
+顔写真 ──▶ [register] ──▶ avatars/<名前>.jpg（avatars.json に登録）
+                                   │
+音声(mp3/wav) or 文章 ──▶ [say なら voice_clone で読み上げ] ──▶ [fal.ai Kling AI Avatar v2] ──▶ output/*.mp4
+```
+
+## セットアップ
+
+1. https://fal.ai でアカウント作成 → https://fal.ai/dashboard/keys で API キーを発行
+2. `.env` に `FAL_KEY=...` を追加
+3. `pip install -r requirements.txt`
+
+## 使い方
+
+```bash
+# 1) 顔写真を登録（初回に同意確認が出ます）
+python avatar.py register face.jpg --name tako
+
+# 2) 音声に合わせてしゃべらせる → output/ に mp4 が保存される
+python avatar.py speak test.mp3 --avatar tako
+python avatar.py speak test.mp3 --avatar tako --emotion 嬉しい
+
+# 3) クローンした声で読み上げ → そのまま動画に（文頭の [嬉しい] などは表情にも使う）
+python avatar.py say "[嬉しい]今日はいい天気ですね" --voice tako --avatar tako
+
+# 一覧 / 削除
+python avatar.py list
+python avatar.py delete tako
+```
+
+| オプション | 内容 |
+|---|---|
+| `--emotion` | 普通 / 嬉しい / 怒る / 悲しい |
+| `--prompt` | 表情・動きの指示を直接書く（英語の方が効きやすい） |
+| `--quality` | `standard`（約 $0.056/秒、既定）/ `pro`（約 $0.115/秒） |
+
+## 顔写真のコツ
+
+| 項目 | 推奨 |
+|---|---|
+| 向き・表情 | 正面、真顔、口を閉じて目を開ける |
+| 画質 | 長辺 1000px 以上、ピントが合っている、顔に影がない |
+| 範囲 | 頭の上から肩まで。背景は無地 |
+| その他 | 眼鏡・マスクなし。前髪が目にかからない |
+
+顔写真と音声は fal.ai にアップロードされます。自分の顔、または本人の同意を得た顔だけを使ってください。

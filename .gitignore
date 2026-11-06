@@ -3,3 +3,8 @@ voices.json
 output/
 .venv/
 __pycache__/
+
+# アバターの顔写真・撮影データ（個人情報）は Git に上げない
+avatars/
+avatars.json
+data/
