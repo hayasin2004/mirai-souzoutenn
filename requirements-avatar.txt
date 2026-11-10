@@ -1,0 +1,5 @@
+# Anam のアバターに喋らせる（avatar コマンド）ときに必要
+-r requirements.txt
+anam>=0.12.0
+opencv-python>=4.9.0
+sounddevice>=0.4.6

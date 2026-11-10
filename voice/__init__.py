@@ -5,5 +5,6 @@
   registry.py  … 作成した声の一覧（voices.json）の管理
   audio_io.py  … 音声ファイルの読み込み・保存・再生
   fish.py      … Fish Audio API の呼び出し（クローン作成・読み上げ・文字起こし）
+  avatar.py    … Anam のアバター（顔）に音声を渡して喋らせる
   cli.py       … コマンドライン（voice/commands/ 内のコマンドを自動で読み込む）
 """
