@@ -1,6 +1,11 @@
 .env
+env
 voices.json
 output/
 data/
 .venv/
 __pycache__/
+web/videos/talk_*.mp4
+web/videos/*.tmp.mp4
+voice_samples/tmp_*
+voice_samples/stt_*

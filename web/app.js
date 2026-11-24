@@ -21,7 +21,24 @@ const els = {
   chatMessages: $("chat-messages"),
   chatInput: $("chat-input"),
   sendChatBtn: $("send-chat-btn"),
+  micBtn: $("mic-btn"),
+  autoSendVoiceToggle: $("auto-send-voice-toggle"),
+  llmProviderSelect: $("llm-provider-select"),
+  localModelSelect: $("local-model-select"),
+  ttsProviderSelect: $("tts-provider-select"),
   enableTtsToggle: $("enable-tts-toggle"),
+  enableAvatarVideoToggle: $("enable-avatar-video-toggle"),
+
+  // アバター映像連携
+  openAvatarWinBtn: $("open-avatar-win-btn"),
+  popoutAvatarBtn: $("popout-avatar-btn"),
+  toggleChatOnlyBtn: $("toggle-chat-only-btn"),
+  avatarSourceSelect: $("avatar-source-select"),
+  avatarUploadInput: $("avatar-upload-input"),
+  mainAvatarImg: $("main-avatar-img"),
+  mainAvatarIdleVideo: $("main-avatar-idle-video"),
+  mainAvatarVideo: $("main-avatar-video"),
+  avatarGenBadge: $("avatar-gen-badge"),
 
   // TTS読み上げ
   ttsText: $("tts-text"),
@@ -107,10 +124,14 @@ const els = {
   cloneVoiceName: $("clone-voice-name"),
   cloneAudioFile: $("clone-audio-file"),
   cloneRefText: $("clone-ref-text"),
+  cloneAvatarSelect: $("clone-avatar-select"),
+  cloneAvatarFile: $("clone-avatar-file"),
   submitCloneBtn: $("submit-clone-btn"),
   cloneStatus: $("clone-status"),
   linkVoiceName: $("link-voice-name"),
   linkVoiceId: $("link-voice-id"),
+  linkAvatarSelect: $("link-avatar-select"),
+  linkAvatarFile: $("link-avatar-file"),
   submitLinkBtn: $("submit-link-btn"),
   linkStatus: $("link-status"),
 
@@ -119,12 +140,17 @@ const els = {
 
 const MAX_HISTORY = 20;
 const STORAGE_KEY = "mirai-voice:last-voice";
+const LLM_PROVIDER_KEY = "mirai-voice:llm-provider";
+const LLM_MODEL_KEY = "mirai-voice:local-model";
+const TTS_PROVIDER_KEY = "mirai-voice:tts-provider";
 
 let maxLength = 1000;
 let history = []; // { id, text, voice, url, filename, createdAt }
 let chatHistory = []; // { role: "user" | "model", text: string }
 let currentPersonaId = "taku";
 let personasList = [];
+let voicesList = [];
+let avatarSourcesList = [];
 let activeId = null;
 let audioCtx = null;
 let analyser = null;
@@ -159,14 +185,15 @@ function showToast(message) {
   toastTimer = setTimeout(() => els.toast.classList.remove("is-visible"), 6000);
 }
 
-function b64ToBlobUrl(b64, mimeType = "audio/mpeg") {
+function b64ToBlobUrl(b64, mimeType = "") {
+  const resolvedMime = mimeType || (b64 && b64.startsWith("UklGR") ? "audio/wav" : "audio/mpeg");
   const byteChars = atob(b64);
   const byteNumbers = new Array(byteChars.length);
   for (let i = 0; i < byteChars.length; i++) {
     byteNumbers[i] = byteChars.charCodeAt(i);
   }
   const byteArray = new Uint8Array(byteNumbers);
-  const blob = new Blob([byteArray], { type: mimeType });
+  const blob = new Blob([byteArray], { type: resolvedMime });
   return URL.createObjectURL(blob);
 }
 
@@ -193,23 +220,57 @@ async function loadVoices() {
   try {
     const res = await fetch("/api/voices");
     const data = await res.json();
+    voicesList = data.voices || [];
     els.voice.innerHTML = "";
-    if (!data.voices.length) {
+    if (!voicesList.length) {
       els.voice.innerHTML = '<option value="">声が未登録です</option>';
       showToast("声が登録されていません。先に python voice_clone.py clone ... で作成してください。");
       return;
     }
-    for (const v of data.voices) {
+    for (const v of voicesList) {
       const opt = document.createElement("option");
       opt.value = v.name;
-      opt.textContent = v.name;
+      opt.textContent = v.avatar ? `${v.name} (🖼️ ${v.avatar})` : v.name;
       els.voice.append(opt);
     }
     const last = localStorage.getItem(STORAGE_KEY);
-    if (last && data.voices.some((v) => v.name === last)) els.voice.value = last;
+    if (last && voicesList.some((v) => v.name === last)) els.voice.value = last;
+    await syncAvatarWithVoice(els.voice.value, { silent: true });
   } catch (e) {
     els.voice.innerHTML = '<option value="">読み込み失敗</option>';
     showToast("声の一覧を取得できませんでした。サーバーが起動しているか確認してください。");
+  }
+}
+
+async function syncAvatarWithVoice(voiceName, { silent = false } = {}) {
+  if (!voiceName) return;
+  const v = voicesList.find((x) => x.name === voiceName);
+  if (!v || !v.avatar) return;
+  if (els.avatarSourceSelect && els.avatarSourceSelect.value === v.avatar) {
+    return;
+  }
+  try {
+    const res = await fetch("/api/avatar/sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: v.avatar }),
+    });
+    const data = await res.json();
+    if (res.ok && data.current_source) {
+      if (els.avatarSourceSelect) els.avatarSourceSelect.value = data.current_source;
+      if (els.mainAvatarImg) {
+        els.mainAvatarImg.src = `/avatars/${encodeURIComponent(data.current_source)}`;
+      }
+      setMainIdleVideo(data.idle_video_urls || data.idle_video_url || null);
+      if (avatarBC && data.state) {
+        avatarBC.postMessage({ type: "state_update", state: data.state });
+      }
+      if (!silent) {
+        showToast(`声「${voiceName}」に合わせて画像「${data.current_source}」に切り替えました`);
+      }
+    }
+  } catch (e) {
+    console.warn("声に紐づく画像の切り替え失敗:", e);
   }
 }
 
@@ -587,6 +648,647 @@ audioQueue.onStateChange = (playing, current) => {
   }
 };
 
+/* ---------- アバター映像（Ditto TalkingHead）連携 & 別画面制御 ---------- */
+
+let avatarWinRef = null;
+const avatarBC = ("BroadcastChannel" in window) ? new BroadcastChannel("mirai_avatar_channel") : null;
+
+function isAvatarWinOpen() {
+  return Boolean(avatarWinRef && !avatarWinRef.closed);
+}
+
+function openAvatarWindow() {
+  const w = 960;
+  const h = 720;
+  const left = Math.max(0, (window.screen.width - w) / 2);
+  const top = Math.max(0, (window.screen.height - h) / 2);
+  avatarWinRef = window.open(
+    "/avatar",
+    "MiraiAvatarScreen",
+    `width=${w},height=${h},left=${left},top=${top},resizable=yes`
+  );
+  if (avatarWinRef) {
+    avatarWinRef.focus();
+    showToast("🎬 映像出力画面を別ウィンドウで開きました！");
+  } else {
+    showToast("ポップアップがブロックされました。ブラウザの許可設定を確認するか /avatar を別タブで開いてください。");
+  }
+}
+
+if (els.openAvatarWinBtn) els.openAvatarWinBtn.addEventListener("click", openAvatarWindow);
+if (els.popoutAvatarBtn) els.popoutAvatarBtn.addEventListener("click", openAvatarWindow);
+
+function setChatOnlyMode(enabled) {
+  document.body.classList.toggle("chat-only-mode", enabled);
+  if (els.toggleChatOnlyBtn) {
+    els.toggleChatOnlyBtn.textContent = enabled ? "📐 通常レイアウトに戻す" : "💬 チャットのみ表示";
+    els.toggleChatOnlyBtn.style.borderColor = enabled ? "var(--accent-1)" : "";
+  }
+}
+
+if (els.toggleChatOnlyBtn) {
+  els.toggleChatOnlyBtn.addEventListener("click", () => {
+    const next = !document.body.classList.contains("chat-only-mode");
+    setChatOnlyMode(next);
+  });
+}
+
+if (window.location.pathname === "/chat" || new URLSearchParams(window.location.search).get("mode") === "chat") {
+  setChatOnlyMode(true);
+}
+
+let currentMainIdleUrl = "";
+let mainIdlePlaylist = [];
+let mainIdleIdx = 0;
+
+function pickNextMainIdleIndex() {
+  if (mainIdlePlaylist.length <= 1) return 0;
+  const candidates = [];
+  for (let i = 0; i < mainIdlePlaylist.length; i++) {
+    if (i !== mainIdleIdx) candidates.push(i);
+  }
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+function playMainIdleIndex(idx) {
+  if (!els.mainAvatarIdleVideo || !mainIdlePlaylist.length) return;
+  mainIdleIdx = idx % mainIdlePlaylist.length;
+  const targetUrl = mainIdlePlaylist[mainIdleIdx];
+  currentMainIdleUrl = targetUrl;
+  els.mainAvatarIdleVideo.loop = (mainIdlePlaylist.length === 1);
+  els.mainAvatarIdleVideo.src = targetUrl;
+  els.mainAvatarIdleVideo.onloadeddata = () => {
+    els.mainAvatarIdleVideo.style.display = "block";
+    els.mainAvatarIdleVideo.play().catch(() => {});
+  };
+  els.mainAvatarIdleVideo.play().catch(() => {});
+}
+
+if (els.mainAvatarIdleVideo) {
+  els.mainAvatarIdleVideo.addEventListener("ended", () => {
+    if (mainIdlePlaylist.length > 1) {
+      playMainIdleIndex(pickNextMainIdleIndex());
+    }
+  });
+}
+
+function setMainIdleVideo(idleUrlsOrSingle) {
+  if (!els.mainAvatarIdleVideo) return;
+  const list = Array.isArray(idleUrlsOrSingle)
+    ? idleUrlsOrSingle.filter(Boolean)
+    : (idleUrlsOrSingle ? [idleUrlsOrSingle] : []);
+  if (!list.length) {
+    mainIdlePlaylist = [];
+    currentMainIdleUrl = "";
+    els.mainAvatarIdleVideo.style.display = "none";
+    els.mainAvatarIdleVideo.removeAttribute("src");
+    return;
+  }
+  const sameList = list.length === mainIdlePlaylist.length && list.every((u, i) => u === mainIdlePlaylist[i]);
+  mainIdlePlaylist = list;
+  els.mainAvatarIdleVideo.loop = (mainIdlePlaylist.length === 1);
+  if (sameList && els.mainAvatarIdleVideo.style.display === "block") {
+    if (els.mainAvatarIdleVideo.paused) els.mainAvatarIdleVideo.play().catch(() => {});
+    return;
+  }
+  if (currentMainIdleUrl && mainIdlePlaylist.includes(currentMainIdleUrl) && els.mainAvatarIdleVideo.style.display === "block") {
+    mainIdleIdx = mainIdlePlaylist.indexOf(currentMainIdleUrl);
+    return;
+  }
+  playMainIdleIndex(0);
+}
+
+async function pollIdleVideoIfReady() {
+  if (mainIdlePlaylist.length >= 3) return;
+  try {
+    const res = await fetch("/api/avatar/state");
+    if (!res.ok) return;
+    const st = await res.json();
+    if (st.idle_video_urls && st.idle_video_urls.length) {
+      setMainIdleVideo(st.idle_video_urls);
+    } else if (st.idle_video_url) {
+      setMainIdleVideo(st.idle_video_url);
+    }
+  } catch (_) {}
+}
+setInterval(pollIdleVideoIfReady, 2500);
+
+function populateVoiceAvatarSelects(sources) {
+  for (const sel of [els.cloneAvatarSelect, els.linkAvatarSelect]) {
+    if (!sel) continue;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">（指定なし / 現在の画像）</option>';
+    for (const s of sources) {
+      const opt = document.createElement("option");
+      opt.value = s.filename;
+      opt.textContent = s.filename;
+      sel.appendChild(opt);
+    }
+    if (prev && sources.some((s) => s.filename === prev)) {
+      sel.value = prev;
+    }
+  }
+}
+
+async function loadAvatarSources() {
+  if (!els.avatarSourceSelect) return;
+  try {
+    const res = await fetch("/api/avatar/sources");
+    if (!res.ok) return;
+    const data = await res.json();
+    avatarSourcesList = data.sources || [];
+    els.avatarSourceSelect.innerHTML = "";
+    for (const s of avatarSourcesList) {
+      const opt = document.createElement("option");
+      opt.value = s.filename;
+      opt.textContent = s.filename;
+      els.avatarSourceSelect.appendChild(opt);
+    }
+    populateVoiceAvatarSelects(avatarSourcesList);
+    if (data.current_source) {
+      els.avatarSourceSelect.value = data.current_source;
+      if (els.mainAvatarImg) {
+        els.mainAvatarImg.src = `/avatars/${encodeURIComponent(data.current_source)}`;
+      }
+      setMainIdleVideo(data.idle_video_urls || data.idle_video_url || null);
+    }
+  } catch (e) {
+    console.warn("アバター画像一覧の取得失敗:", e);
+  }
+}
+
+if (els.avatarSourceSelect) {
+  els.avatarSourceSelect.addEventListener("change", async () => {
+    const filename = els.avatarSourceSelect.value;
+    if (!filename) return;
+    try {
+      const res = await fetch("/api/avatar/sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+      const data = await res.json();
+      if (res.ok && data.current_source) {
+        if (els.mainAvatarImg) {
+          els.mainAvatarImg.src = `/avatars/${encodeURIComponent(data.current_source)}`;
+        }
+        setMainIdleVideo(data.idle_video_urls || data.idle_video_url || null);
+        if (avatarBC && data.state) {
+          avatarBC.postMessage({ type: "state_update", state: data.state });
+        }
+        showToast(`アバターの顔を「${data.current_source}」に変更しました`);
+      }
+    } catch (e) {
+      showToast("顔画像の変更に失敗しました");
+    }
+  });
+}
+
+if (els.avatarUploadInput) {
+  els.avatarUploadInput.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await fetch("/api/avatar/sources", { method: "POST", body: fd });
+      const data = await res.json();
+      if (res.ok) {
+        await loadAvatarSources();
+        if (avatarBC && data.state) {
+          avatarBC.postMessage({ type: "state_update", state: data.state });
+        }
+        showToast(`顔画像「${data.current_source}」をアップロードしました！`);
+      } else {
+        showToast(data.error || "アップロード失敗");
+      }
+    } catch (err) {
+      showToast("アップロードエラー: " + err.message);
+    }
+  });
+}
+
+if (avatarBC) {
+  avatarBC.onmessage = (ev) => {
+    const msg = ev.data || {};
+    if (msg.type === "source_changed" && msg.filename) {
+      loadAvatarSources();
+    } else if (msg.type === "avatar_chat_sync" && msg.userText && msg.replyText) {
+      appendChatBubble("user", msg.userText);
+      appendChatBubble("model", msg.replyText);
+      chatHistory.push({ role: "user", text: msg.userText });
+      chatHistory.push({ role: "model", text: msg.replyText });
+    }
+  };
+}
+
+const mainVideoQueue = [];
+let isPlayingMainVideo = false;
+
+function _startMainPreviewVideo(videoUrl) {
+  if (!els.mainAvatarVideo) return;
+  isPlayingMainVideo = true;
+  els.mainAvatarVideo.style.opacity = "0";
+  els.mainAvatarVideo.src = videoUrl + "?t=" + Date.now();
+  // 別ウィンドウで映像画面が開いている場合、またはチャットのみモード時は、二重音声を防ぐためメイン画面側をミュート
+  const muteLocal = isAvatarWinOpen() || document.body.classList.contains("chat-only-mode");
+  els.mainAvatarVideo.muted = muteLocal;
+  els.mainAvatarVideo.onloadeddata = () => {
+    els.mainAvatarVideo.style.opacity = "1";
+    els.mainAvatarVideo.style.pointerEvents = "auto";
+  };
+  els.mainAvatarVideo.play().then(() => {
+    els.mainAvatarVideo.style.opacity = "1";
+    els.mainAvatarVideo.style.pointerEvents = "auto";
+  }).catch((err) => {
+    console.warn("プレビュー動画再生失敗:", err);
+    isPlayingMainVideo = false;
+  });
+}
+
+function playMainPreviewVideo(videoUrl) {
+  if (!els.mainAvatarVideo || !videoUrl) return;
+  if (isPlayingMainVideo) {
+    mainVideoQueue.push(videoUrl);
+    return;
+  }
+  _startMainPreviewVideo(videoUrl);
+}
+
+function notifyVideoPlayed(videoUrl) {
+  if (!videoUrl || !videoUrl.includes("/videos/talk_")) return;
+  fetch("/api/avatar/video_played", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_url: videoUrl }),
+  }).catch(() => {});
+}
+
+if (els.mainAvatarVideo) {
+  els.mainAvatarVideo.addEventListener("ended", () => {
+    const finishedUrl = els.mainAvatarVideo.currentSrc || els.mainAvatarVideo.src;
+    notifyVideoPlayed(finishedUrl);
+    if (mainVideoQueue.length > 0) {
+      const nextUrl = mainVideoQueue.shift();
+      _startMainPreviewVideo(nextUrl);
+      return;
+    }
+    isPlayingMainVideo = false;
+    els.mainAvatarVideo.style.opacity = "0";
+    els.mainAvatarVideo.style.pointerEvents = "none";
+    els.mainAvatarVideo.removeAttribute("src");
+  });
+}
+
+async function generateAndPlayAvatarVideo(audioBase64List, replyText, metaEl = null, taskId = null) {
+  if (!taskId && (!audioBase64List || audioBase64List.length === 0)) return null;
+
+  const currentPersona = personasList.find((p) => p.id === currentPersonaId);
+  const personaName = currentPersona ? currentPersona.name : "市川 拓";
+  const sourceFilename = els.avatarSourceSelect ? els.avatarSourceSelect.value : "";
+
+  if (els.avatarGenBadge) els.avatarGenBadge.style.display = "block";
+  els.nowPlaying.textContent = "🎬 チャット返答からアバター映像を生成中...";
+
+  let genBadgeEl = null;
+  if (metaEl) {
+    genBadgeEl = document.createElement("span");
+    genBadgeEl.className = "bubble-timing";
+    genBadgeEl.style.color = "var(--accent-2)";
+    genBadgeEl.textContent = "🎬 映像生成中...";
+    metaEl.prepend(genBadgeEl);
+  }
+
+  if (avatarBC) {
+    avatarBC.postMessage({
+      type: "state_update",
+      state: {
+        status: "generating",
+        status_text: "チャット返答からリップシンク映像を生成中...",
+        reply_text: replyText,
+        persona_name: personaName,
+      },
+    });
+  }
+
+  try {
+    const reqBody = taskId
+      ? { task_id: taskId, text: replyText, persona_name: personaName, source_filename: sourceFilename }
+      : { audio_base64_list: audioBase64List, text: replyText, persona_name: personaName, source_filename: sourceFilename };
+    const res = await fetch("/api/avatar/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(reqBody),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "映像生成に失敗しました");
+
+    if (avatarBC && data.state) {
+      avatarBC.postMessage({ type: "state_update", state: data.state });
+    }
+
+    playMainPreviewVideo(data.video_url);
+    const vt = data.timing;
+    if (vt) {
+      console.log(
+        `[SPEED LOG] 🎬 映像生成完了: 合計 ${vt.total_video_sec}s (音声変換: ${vt.audio_prep_sec}s / Ditto GPU: ${vt.ditto_gen_sec}s / 音声尺: ${vt.audio_duration_sec}s / ${vt.frames}f @ ${vt.effective_fps}fps)`
+      );
+      els.nowPlaying.textContent = `🎬 映像再生中 (生成 ${vt.total_video_sec}s): ${replyText}`;
+      if (genBadgeEl) {
+        genBadgeEl.title = `音声変換: ${vt.audio_prep_sec}s / Ditto GPU: ${vt.ditto_gen_sec}s / 音声尺: ${vt.audio_duration_sec}s (${vt.frames}frames, ${vt.effective_fps}fps)`;
+        genBadgeEl.textContent = `🎬 映像 ${vt.total_video_sec}s`;
+      }
+    } else {
+      els.nowPlaying.textContent = `🎬 映像再生中: ${replyText}`;
+      if (genBadgeEl) {
+        genBadgeEl.textContent = "🎬 映像再生完了";
+      }
+    }
+    return data.video_url;
+  } catch (err) {
+    console.error("映像生成エラー:", err);
+    showToast("映像生成エラー: " + err.message);
+    if (genBadgeEl) genBadgeEl.textContent = "⚠️ 映像エラー";
+    return null;
+  } finally {
+    if (els.avatarGenBadge) els.avatarGenBadge.style.display = "none";
+  }
+}
+
+/* ---------- 音声認識 (Web Speech API ＋ Gemini STT フォールバック) ---------- */
+
+let speechRec = null;
+let isRecordingVoice = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let mediaStream = null;
+let voiceBaseText = "";
+let voiceFinalText = "";
+let voiceHasResult = false;
+let preferServerStt = false;
+
+function setMicUiState(state) {
+  if (!els.micBtn) return;
+  els.micBtn.classList.remove("is-recording", "is-transcribing");
+  if (state === "recording") {
+    els.micBtn.classList.add("is-recording");
+    els.micBtn.textContent = "⏹️";
+    els.micBtn.title = "クリックして音声入力を停止";
+  } else if (state === "transcribing") {
+    els.micBtn.classList.add("is-transcribing");
+    els.micBtn.textContent = "⏳";
+    els.micBtn.title = "音声を文字起こし中...";
+  } else {
+    els.micBtn.textContent = "🎤";
+    els.micBtn.title = "マイクで音声入力（クリックで開始/停止）";
+  }
+}
+
+function stopMediaRecorderStt() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+  }
+  isRecordingVoice = false;
+}
+
+async function startMediaRecorderStt() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast("この環境ではマイク入力が利用できません（localhost または https:// で開いてください）");
+    setMicUiState("idle");
+    return;
+  }
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordedChunks = [];
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+    mediaRecorder = mimeType ? new MediaRecorder(mediaStream, { mimeType }) : new MediaRecorder(mediaStream);
+
+    mediaRecorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) recordedChunks.push(ev.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+        mediaStream = null;
+      }
+      if (!recordedChunks.length) {
+        setMicUiState("idle");
+        return;
+      }
+      setMicUiState("transcribing");
+      const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+      const fd = new FormData();
+      fd.append("audio", blob, "voice.webm");
+      try {
+        const res = await fetch("/api/stt", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "音声認識に失敗しました");
+        const recognized = (data.text || "").trim();
+        if (recognized) {
+          els.chatInput.value = (voiceBaseText ? voiceBaseText + " " : "") + recognized;
+          if (els.autoSendVoiceToggle && els.autoSendVoiceToggle.checked && !els.sendChatBtn.disabled) {
+            sendChat();
+          } else {
+            els.chatInput.focus();
+          }
+        } else {
+          showToast("音声を聞き取れませんでした。もう一度お試しください。");
+        }
+      } catch (err) {
+        showToast(err.message);
+      } finally {
+        setMicUiState("idle");
+      }
+    };
+
+    voiceBaseText = els.chatInput.value.trim();
+    isRecordingVoice = true;
+    setMicUiState("recording");
+    mediaRecorder.start();
+    showToast("🎙️ 録音中... 話し終わったらもう一度ボタンを押してください");
+  } catch (err) {
+    isRecordingVoice = false;
+    setMicUiState("idle");
+    if (err.name === "NotAllowedError") {
+      showToast("マイクの使用が許可されていません。ブラウザのマイク権限を確認してください。");
+    } else {
+      showToast("マイクを起動できませんでした: " + err.message);
+    }
+  }
+}
+
+function startWebSpeechStt() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec || preferServerStt) {
+    startMediaRecorderStt();
+    return;
+  }
+
+  speechRec = new SpeechRec();
+  speechRec.lang = "ja-JP";
+  speechRec.interimResults = true;
+  speechRec.continuous = false;
+
+  voiceBaseText = els.chatInput.value.trim();
+  voiceFinalText = "";
+  voiceHasResult = false;
+  let fallbackTriggered = false;
+
+  speechRec.onstart = () => {
+    isRecordingVoice = true;
+    setMicUiState("recording");
+  };
+
+  speechRec.onresult = (ev) => {
+    let interim = "";
+    let finalSeg = "";
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const tr = ev.results[i][0].transcript;
+      if (ev.results[i].isFinal) {
+        finalSeg += tr;
+      } else {
+        interim += tr;
+      }
+    }
+    if (finalSeg) {
+      voiceFinalText += finalSeg;
+      voiceHasResult = true;
+    }
+    const combined = (voiceFinalText + interim).trim();
+    if (combined) {
+      els.chatInput.value = (voiceBaseText ? voiceBaseText + " " : "") + combined;
+    }
+  };
+
+  speechRec.onerror = (ev) => {
+    isRecordingVoice = false;
+    if (ev.error === "network" || ev.error === "service-not-allowed") {
+      // ブラウザ標準の音声認識が使えない場合はサーバー側 Gemini STT へ自動フォールバック
+      preferServerStt = true;
+      fallbackTriggered = true;
+      startMediaRecorderStt();
+      return;
+    }
+    setMicUiState("idle");
+    if (ev.error === "not-allowed") {
+      showToast("マイクの使用が許可されていません。ブラウザの権限を許可してください。");
+    } else if (ev.error !== "aborted" && ev.error !== "no-speech") {
+      showToast(`音声認識エラー: ${ev.error}`);
+    }
+  };
+
+  speechRec.onend = () => {
+    if (fallbackTriggered) return;
+    isRecordingVoice = false;
+    setMicUiState("idle");
+    const textToSend = els.chatInput.value.trim();
+    if (voiceHasResult && textToSend && els.autoSendVoiceToggle && els.autoSendVoiceToggle.checked && !els.sendChatBtn.disabled) {
+      sendChat();
+    } else if (textToSend) {
+      els.chatInput.focus();
+    }
+  };
+
+  try {
+    speechRec.start();
+  } catch (e) {
+    isRecordingVoice = false;
+    setMicUiState("idle");
+    startMediaRecorderStt();
+  }
+}
+
+function toggleVoiceInput() {
+  if (isRecordingVoice) {
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      stopMediaRecorderStt();
+    } else if (speechRec) {
+      speechRec.stop();
+    }
+    return;
+  }
+  startWebSpeechStt();
+}
+
+if (els.micBtn) {
+  els.micBtn.addEventListener("click", toggleVoiceInput);
+}
+
+/* ---------- ローカルLLM (Ollama) 設定管理 ---------- */
+
+async function loadLlmStatus() {
+  if (els.ttsProviderSelect) {
+    const savedTts = localStorage.getItem(TTS_PROVIDER_KEY);
+    if (savedTts && ["fish", "gemini-lite", "gemini-flash", "local"].includes(savedTts)) {
+      els.ttsProviderSelect.value = savedTts;
+    }
+  }
+  if (!els.llmProviderSelect || !els.localModelSelect) return;
+  const savedProvider = localStorage.getItem(LLM_PROVIDER_KEY);
+  if (savedProvider === "ollama" || savedProvider === "gemini") {
+    els.llmProviderSelect.value = savedProvider;
+  }
+  const updateModelSelectVisibility = () => {
+    const isLocal = els.llmProviderSelect.value === "ollama";
+    els.localModelSelect.style.display = isLocal ? "inline-block" : "none";
+  };
+  updateModelSelectVisibility();
+
+  try {
+    const res = await fetch("/api/llm/status");
+    if (!res.ok) return;
+    const data = await res.json();
+    els.localModelSelect.innerHTML = "";
+    if (data.ollama_running && data.models && data.models.length > 0) {
+      for (const m of data.models) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        els.localModelSelect.appendChild(opt);
+      }
+      const savedModel = localStorage.getItem(LLM_MODEL_KEY);
+      if (savedModel && data.models.includes(savedModel)) {
+        els.localModelSelect.value = savedModel;
+      } else if (data.default_local_model && data.models.includes(data.default_local_model)) {
+        els.localModelSelect.value = data.default_local_model;
+      }
+    } else {
+      const opt = document.createElement("option");
+      opt.value = data.default_local_model || "qwen2.5:7b";
+      opt.textContent = data.ollama_running ? "モデル未DL (qwen2.5:7b等)" : "Ollama未起動";
+      els.localModelSelect.appendChild(opt);
+    }
+  } catch (e) {
+    console.warn("LLM状態取得失敗:", e);
+  }
+}
+
+if (els.llmProviderSelect) {
+  els.llmProviderSelect.addEventListener("change", () => {
+    const val = els.llmProviderSelect.value;
+    localStorage.setItem(LLM_PROVIDER_KEY, val);
+    if (els.localModelSelect) {
+      els.localModelSelect.style.display = val === "ollama" ? "inline-block" : "none";
+    }
+    if (val === "ollama") {
+      loadLlmStatus();
+    }
+  });
+}
+
+if (els.localModelSelect) {
+  els.localModelSelect.addEventListener("change", () => {
+    localStorage.setItem(LLM_MODEL_KEY, els.localModelSelect.value);
+  });
+}
+
+if (els.ttsProviderSelect) {
+  els.ttsProviderSelect.addEventListener("change", () => {
+    localStorage.setItem(TTS_PROVIDER_KEY, els.ttsProviderSelect.value);
+  });
+}
+
 /* ---------- AI対話 (Chat - ストリーミング版) ---------- */
 
 function setChatLoading(loading) {
@@ -609,9 +1311,10 @@ async function sendChat() {
     return;
   }
 
-  const enableTts = els.enableTtsToggle ? els.enableTtsToggle.checked : false;
+  const useAvatarVideo = els.enableAvatarVideoToggle ? els.enableAvatarVideoToggle.checked : true;
+  const enableTts = (els.enableTtsToggle ? els.enableTtsToggle.checked : false) || useAvatarVideo;
 
-  if (enableTts) ensureAudioGraph();
+  if (enableTts && !useAvatarVideo) ensureAudioGraph();
   setChatLoading(true);
 
   // 1. ユーザーの吹き出しを追加
@@ -628,7 +1331,14 @@ async function sendChat() {
 
   let fullReplyText = "";
   const audioSegments = [];
+  const audioBase64Segments = [];
   let firstAudioPlayed = false;
+  let avatarPipelineChain = Promise.resolve();
+  let pipelinedVideoCount = 0;
+
+  const llmProvider = els.llmProviderSelect ? els.llmProviderSelect.value : "gemini";
+  const llmModel = els.localModelSelect ? els.localModelSelect.value : "";
+  const ttsProvider = els.ttsProviderSelect ? els.ttsProviderSelect.value : "fish";
 
   try {
     const res = await fetch("/api/chat/stream", {
@@ -641,6 +1351,10 @@ async function sendChat() {
         speed: speed === 1 ? null : speed,
         history: chatHistory,
         enable_tts: enableTts,
+        avatar_mode: useAvatarVideo,
+        llm_provider: llmProvider,
+        llm_model: llmModel,
+        tts_provider: ttsProvider,
       }),
     });
 
@@ -682,7 +1396,6 @@ async function sendChat() {
           if (cursorEl) textEl.appendChild(cursorEl);
           els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
         } else if (payload.type === "audio_segment") {
-          // 音声セグメント受信 ➔ 即キュー投入＆再生
           const blobUrl = b64ToBlobUrl(payload.audio_base64);
           const segItem = {
             index: payload.index,
@@ -691,13 +1404,26 @@ async function sendChat() {
             latencySec: payload.latency_sec,
           };
           audioSegments.push(segItem);
+          audioBase64Segments.push(payload.audio_base64);
 
           if (!firstAudioPlayed) {
             firstAudioPlayed = true;
             console.log(`[DEBUG] ⚡ 初声レイテンシー: ${payload.latency_sec}秒`);
           }
 
-          audioQueue.enqueue(segItem);
+          // アバター映像モードがOFFの時は音声を即時再生、ONの時は1文目から即座に先行映像生成＆キュー再生
+          if (!useAvatarVideo) {
+            audioQueue.enqueue(segItem);
+          } else if (payload.avatar_task_id) {
+            pipelinedVideoCount += 1;
+            const segNum = pipelinedVideoCount;
+            const taskId = payload.avatar_task_id;
+            const segText = payload.text;
+            const segB64 = payload.audio_base64;
+            avatarPipelineChain = avatarPipelineChain.then(() =>
+              generateAndPlayAvatarVideo([segB64], segText, segNum === 1 ? metaEl : null, taskId)
+            );
+          }
         } else if (payload.type === "done") {
           if (cursorEl) cursorEl.remove();
 
@@ -725,10 +1451,26 @@ async function sendChat() {
           playBtn.type = "button";
 
           if (audioSegments.length > 0) {
-            playBtn.innerHTML = "▶ もう一度聴く";
+            let generatedVideoUrl = null;
+            playBtn.innerHTML = useAvatarVideo ? "▶ 映像をもう一度再生" : "▶ もう一度聴く";
             playBtn.addEventListener("click", () => {
-              ensureAudioGraph();
-              audioQueue.playAll(audioSegments);
+              if (generatedVideoUrl) {
+                playMainPreviewVideo(generatedVideoUrl);
+                if (avatarBC) {
+                  avatarBC.postMessage({
+                    type: "state_update",
+                    state: {
+                      status: "ready",
+                      video_id: Date.now(),
+                      video_url: generatedVideoUrl,
+                      reply_text: fullReplyText,
+                    },
+                  });
+                }
+              } else {
+                ensureAudioGraph();
+                audioQueue.playAll(audioSegments);
+              }
             });
             metaEl.append(playBtn);
 
@@ -741,11 +1483,17 @@ async function sendChat() {
               filename: `tts_${timestampForFile(new Date())}.mp3`,
               createdAt: new Date(),
             });
+
+            // 1文目先行パイプラインで未起動の場合のみ、done後にまとめて生成
+            if (useAvatarVideo && pipelinedVideoCount === 0 && (payload.avatar_task_id || audioBase64Segments.length > 0)) {
+              generateAndPlayAvatarVideo(audioBase64Segments, fullReplyText, metaEl, payload.avatar_task_id || null).then((vUrl) => {
+                if (vUrl) generatedVideoUrl = vUrl;
+              });
+            }
           } else {
             // TTSがOFFだった場合：オンデマンドで生成するボタン
-            playBtn.innerHTML = "🔊 声で聴く";
+            playBtn.innerHTML = "🎬 映像で話す / 声で聴く";
             playBtn.addEventListener("click", async () => {
-              ensureAudioGraph();
               playBtn.disabled = true;
               playBtn.innerHTML = "⏳ 生成中...";
               try {
@@ -770,14 +1518,42 @@ async function sendChat() {
                   createdAt: new Date(),
                 };
                 addHistory(item);
-                playItem(item);
-                playBtn.disabled = false;
-                playBtn.innerHTML = "▶ もう一度聴く";
-                playBtn.onclick = () => playItem(item);
+                const wantVideo = els.enableAvatarVideoToggle ? els.enableAvatarVideoToggle.checked : true;
+                if (wantVideo) {
+                  const arrBuf = await blob.arrayBuffer();
+                  const bytes = new Uint8Array(arrBuf);
+                  let binary = "";
+                  for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                  }
+                  const b64 = btoa(binary);
+                  const vUrl = await generateAndPlayAvatarVideo([b64], fullReplyText, metaEl);
+                  playBtn.disabled = false;
+                  playBtn.innerHTML = "▶ 映像をもう一度再生";
+                  playBtn.onclick = () => {
+                    if (vUrl) {
+                      playMainPreviewVideo(vUrl);
+                      if (avatarBC) {
+                        avatarBC.postMessage({
+                          type: "state_update",
+                          state: { status: "ready", video_id: Date.now(), video_url: vUrl, reply_text: fullReplyText },
+                        });
+                      }
+                    } else {
+                      playItem(item);
+                    }
+                  };
+                } else {
+                  ensureAudioGraph();
+                  playItem(item);
+                  playBtn.disabled = false;
+                  playBtn.innerHTML = "▶ もう一度聴く";
+                  playBtn.onclick = () => playItem(item);
+                }
               } catch (e) {
                 showToast(e.message);
                 playBtn.disabled = false;
-                playBtn.innerHTML = "🔊 声で聴く";
+                playBtn.innerHTML = "🎬 映像で話す / 声で聴く";
               }
             });
             metaEl.append(playBtn);
@@ -926,11 +1702,12 @@ async function speakTts() {
   setTtsLoading(true);
 
   const speed = Number(els.speed.value);
+  const ttsProvider = els.ttsProviderSelect ? els.ttsProviderSelect.value : "fish";
   try {
     const res = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice, speed: speed === 1 ? null : speed }),
+      body: JSON.stringify({ text, voice, speed: speed === 1 ? null : speed, tts_provider: ttsProvider }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -947,7 +1724,19 @@ async function speakTts() {
       createdAt,
     };
     addHistory(item);
-    playItem(item);
+    const useAvatarVideo = els.enableAvatarVideoToggle ? els.enableAvatarVideoToggle.checked : true;
+    if (useAvatarVideo) {
+      const arrBuf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrBuf);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const b64 = btoa(binary);
+      await generateAndPlayAvatarVideo([b64], text);
+    } else {
+      playItem(item);
+    }
   } catch (e) {
     els.nowPlaying.textContent = "生成に失敗しました";
     showToast(e.message);
@@ -1168,6 +1957,7 @@ async function loadPersonas() {
     }
 
     updateCurrentPersonaUI();
+    localStorage.setItem("mirai-voice:current-persona", currentPersonaId);
   } catch (e) {
     console.warn("ペルソナ一覧の取得失敗:", e);
   }
@@ -1179,11 +1969,12 @@ function updateCurrentPersonaUI() {
   if (els.lineCurrentPersonaName) {
     els.lineCurrentPersonaName.textContent = name;
   }
-  // そのペルソナに声が設定されていれば声を自動選択
+  // そのペルソナに声が設定されていれば声を自動選択し、紐づく画像も同期
   if (current && current.voice_name && els.voice) {
     const voiceOpts = Array.from(els.voice.options);
     if (voiceOpts.some((o) => o.value === current.voice_name)) {
       els.voice.value = current.voice_name;
+      syncAvatarWithVoice(current.voice_name, { silent: true });
     }
   }
 }
@@ -1191,6 +1982,7 @@ function updateCurrentPersonaUI() {
 if (els.personaSelect) {
   els.personaSelect.addEventListener("change", async (e) => {
     currentPersonaId = e.target.value;
+    localStorage.setItem("mirai-voice:current-persona", currentPersonaId);
     updateCurrentPersonaUI();
 
     // LINEの会話・学習対象も連動切り替え
@@ -1356,6 +2148,44 @@ function renderVoiceManageList(voices) {
       <span class="voice-item-id">ID: ${escapeHtml(v.id || "-")}</span>
     `;
 
+    const avatarBindWrap = document.createElement("div");
+    avatarBindWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap;";
+    const avatarSelect = document.createElement("select");
+    avatarSelect.style.cssText = "font-size:0.75rem;padding:2px 6px;max-width:160px;";
+    avatarSelect.title = "この声に紐付ける顔画像";
+    const noneOpt = document.createElement("option");
+    noneOpt.value = "";
+    noneOpt.textContent = "🖼️ 画像未設定";
+    avatarSelect.appendChild(noneOpt);
+    for (const s of avatarSourcesList) {
+      const opt = document.createElement("option");
+      opt.value = s.filename;
+      opt.textContent = `🖼️ ${s.filename}`;
+      avatarSelect.appendChild(opt);
+    }
+    avatarSelect.value = v.avatar || "";
+    avatarSelect.addEventListener("change", async () => {
+      const newAvatar = avatarSelect.value;
+      try {
+        const res = await fetch(`/api/voices/${encodeURIComponent(v.name)}/avatar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ avatar: newAvatar }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "紐付けに失敗しました");
+        showToast(newAvatar ? `声「${v.name}」に画像「${newAvatar}」を設定し、待機映像を準備しました` : `声「${v.name}」の画像紐付けを解除しました`);
+        await loadVoices();
+        if (els.voice.value === v.name && newAvatar) {
+          await syncAvatarWithVoice(v.name, { silent: true });
+        }
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+    avatarBindWrap.appendChild(avatarSelect);
+    info.appendChild(avatarBindWrap);
+
     const actions = document.createElement("div");
     actions.className = "voice-item-actions";
 
@@ -1453,6 +2283,8 @@ if (els.formCloneAudio) {
     const name = els.cloneVoiceName.value.trim();
     const file = els.cloneAudioFile.files[0];
     const refText = els.cloneRefText ? els.cloneRefText.value.trim() : "";
+    const avatarSelectVal = els.cloneAvatarSelect ? els.cloneAvatarSelect.value : "";
+    const avatarFile = els.cloneAvatarFile && els.cloneAvatarFile.files ? els.cloneAvatarFile.files[0] : null;
 
     if (!name || !file) {
       showToast("声の名前と音声ファイルは必須です");
@@ -1463,6 +2295,8 @@ if (els.formCloneAudio) {
     formData.append("name", name);
     formData.append("audio", file);
     if (refText) formData.append("ref_text", refText);
+    if (avatarFile) formData.append("avatar_file", avatarFile);
+    else if (avatarSelectVal) formData.append("avatar", avatarSelectVal);
 
     els.submitCloneBtn.disabled = true;
     els.submitCloneBtn.classList.add("is-loading");
@@ -1476,14 +2310,23 @@ if (els.formCloneAudio) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "クローン作成に失敗しました");
 
-      if (els.cloneStatus) els.cloneStatus.textContent = "✓ クローン作成が完了しました！";
-      showToast(`新しい声「${name}」を登録しました！`);
+      const hasAvatar = Boolean(data.avatar);
+      if (els.cloneStatus) {
+        els.cloneStatus.textContent = hasAvatar && !data.idle_video_url
+          ? "✓ 登録完了！待機映像をバックグラウンドで生成中..."
+          : "✓ クローン作成が完了しました！";
+      }
+      showToast(hasAvatar ? `声「${name}」と画像「${data.avatar}」を登録しました！` : `新しい声「${name}」を登録しました！`);
       els.cloneVoiceName.value = "";
       els.cloneAudioFile.value = "";
       if (els.cloneRefText) els.cloneRefText.value = "";
+      if (els.cloneAvatarFile) els.cloneAvatarFile.value = "";
+      await loadAvatarSources();
       await loadVoices();
       await loadVoiceManageList();
       els.voice.value = name;
+      localStorage.setItem(STORAGE_KEY, name);
+      await syncAvatarWithVoice(name, { silent: true });
     } catch (err) {
       if (els.cloneStatus) els.cloneStatus.textContent = `❌ エラー: ${err.message}`;
       showToast(err.message);
@@ -1499,6 +2342,8 @@ if (els.formLinkId) {
     e.preventDefault();
     const name = els.linkVoiceName.value.trim();
     const voiceId = els.linkVoiceId.value.trim();
+    const avatarSelectVal = els.linkAvatarSelect ? els.linkAvatarSelect.value : "";
+    const avatarFile = els.linkAvatarFile && els.linkAvatarFile.files ? els.linkAvatarFile.files[0] : null;
 
     if (!name || !voiceId) {
       showToast("声の名前とReference IDを入力してください");
@@ -1509,21 +2354,39 @@ if (els.formLinkId) {
     if (els.linkStatus) els.linkStatus.textContent = "⏳ 登録中...";
 
     try {
-      const res = await fetch("/api/voices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, id: voiceId }),
-      });
+      let res;
+      if (avatarFile) {
+        const fd = new FormData();
+        fd.append("name", name);
+        fd.append("id", voiceId);
+        fd.append("avatar_file", avatarFile);
+        res = await fetch("/api/voices", { method: "POST", body: fd });
+      } else {
+        res = await fetch("/api/voices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, id: voiceId, avatar: avatarSelectVal }),
+        });
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "登録に失敗しました");
 
-      if (els.linkStatus) els.linkStatus.textContent = "✓ 登録しました！";
-      showToast(`声「${name}」を登録しました！`);
+      const hasAvatar = Boolean(data.avatar);
+      if (els.linkStatus) {
+        els.linkStatus.textContent = hasAvatar && !data.idle_video_url
+          ? "✓ 登録完了！待機映像をバックグラウンドで生成中..."
+          : "✓ 登録しました！";
+      }
+      showToast(hasAvatar ? `声「${name}」と画像「${data.avatar}」を登録しました！` : `声「${name}」を登録しました！`);
       els.linkVoiceName.value = "";
       els.linkVoiceId.value = "";
+      if (els.linkAvatarFile) els.linkAvatarFile.value = "";
+      await loadAvatarSources();
       await loadVoices();
       await loadVoiceManageList();
       els.voice.value = name;
+      localStorage.setItem(STORAGE_KEY, name);
+      await syncAvatarWithVoice(name, { silent: true });
     } catch (err) {
       if (els.linkStatus) els.linkStatus.textContent = `❌ エラー: ${err.message}`;
       showToast(err.message);
@@ -1535,6 +2398,400 @@ if (els.formLinkId) {
 
 if (els.manageVoicesBtn) els.manageVoicesBtn.addEventListener("click", openVoiceDialog);
 if (els.closeVoiceDialogBtn && els.voiceDialog) els.closeVoiceDialogBtn.addEventListener("click", () => els.voiceDialog.close());
+
+/* ---------- 一気通貫 分身AI作成ウィザード（写真撮影・録音・アンケート） ---------- */
+
+(function initSetupWizard() {
+  const openBtn = $("open-wizard-btn");
+  const dialog = $("wizard-dialog");
+  const closeBtn = $("close-wizard-btn");
+  if (!openBtn || !dialog) return;
+
+  const stepPills = Array.from(dialog.querySelectorAll(".wstep-pill"));
+  const panels = [1, 2, 3].map((n) => $(`wizard-step-${n}`));
+
+  const wizVideo = $("wiz-video");
+  const wizPhotoPreview = $("wiz-photo-preview");
+  const wizCanvas = $("wiz-canvas");
+  const camSelect = $("wiz-camera-select");
+  const startCamBtn = $("wiz-start-cam-btn");
+  const captureBtn = $("wiz-capture-btn");
+  const retakeBtn = $("wiz-retake-btn");
+  const photoFileInput = $("wiz-photo-file");
+  const step1Status = $("wiz-step1-status");
+  const next1Btn = $("wiz-next-1-btn");
+
+  const recBtn = $("wiz-rec-btn");
+  const recTimer = $("wiz-rec-timer");
+  const audioFileInput = $("wiz-audio-file");
+  const audioPreview = $("wiz-audio-preview");
+  const back2Btn = $("wiz-back-2-btn");
+  const step2Status = $("wiz-step2-status");
+  const next2Btn = $("wiz-next-2-btn");
+
+  const back3Btn = $("wiz-back-3-btn");
+  const submitStatus = $("wiz-submit-status");
+  const submitBtn = $("wiz-submit-btn");
+
+  let camStream = null;
+  let capturedPhotoBlob = null;
+  let capturedPhotoName = "photo.png";
+
+  let wizRecStream = null;
+  let wizMediaRec = null;
+  let wizAudioChunks = [];
+  let recordedAudioBlob = null;
+  let recordedAudioName = "voice.webm";
+  let recTimerId = null;
+  let recStartMs = 0;
+
+  function stopCamera() {
+    if (camStream) {
+      camStream.getTracks().forEach((t) => t.stop());
+      camStream = null;
+    }
+    if (wizVideo) wizVideo.srcObject = null;
+    if (captureBtn) captureBtn.disabled = true;
+  }
+
+  function stopWizAudioRec() {
+    if (wizMediaRec && wizMediaRec.state === "recording") {
+      wizMediaRec.stop();
+    }
+    if (recTimerId) {
+      clearInterval(recTimerId);
+      recTimerId = null;
+    }
+  }
+
+  function goToStep(stepNum) {
+    stepPills.forEach((p) => {
+      p.classList.toggle("is-active", Number(p.dataset.wstep) === stepNum);
+    });
+    panels.forEach((panel, idx) => {
+      if (panel) panel.classList.toggle("is-hidden", idx + 1 !== stepNum);
+    });
+    if (stepNum === 1 && !capturedPhotoBlob && !camStream) {
+      startCamera();
+    }
+    if (stepNum !== 1) {
+      stopCamera();
+    }
+  }
+
+  async function refreshCameraList(selectedId = "") {
+    if (!camSelect || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter((d) => d.kind === "videoinput");
+      const prev = selectedId || camSelect.value;
+      camSelect.innerHTML = '<option value="">📷 カメラを自動選択</option>';
+      videoInputs.forEach((d, idx) => {
+        const opt = document.createElement("option");
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `カメラ ${idx + 1}`;
+        camSelect.appendChild(opt);
+      });
+      if (prev && videoInputs.some((d) => d.deviceId === prev)) {
+        camSelect.value = prev;
+      }
+    } catch (_) {}
+  }
+
+  async function startCamera(deviceId = "") {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (step1Status) step1Status.textContent = "⚠️ カメラが使えないため画像ファイルを選択してください（localhost/httpsが必要）";
+      return;
+    }
+    const targetId = deviceId || (camSelect ? camSelect.value : "");
+    try {
+      stopCamera();
+      if (targetId) {
+        camStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: targetId } } });
+      } else {
+        try {
+          camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } } });
+        } catch (_) {
+          camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+      }
+      wizVideo.srcObject = camStream;
+      wizVideo.style.display = "block";
+      wizPhotoPreview.style.display = "none";
+      captureBtn.disabled = false;
+      retakeBtn.style.display = "none";
+      const activeTrack = camStream.getVideoTracks()[0];
+      const activeId = activeTrack && activeTrack.getSettings ? activeTrack.getSettings().deviceId : "";
+      await refreshCameraList(targetId || activeId || "");
+      if (step1Status) step1Status.textContent = "📷 カメラ準備完了";
+    } catch (err) {
+      await refreshCameraList();
+      const reason = err && err.name ? `${err.name}: ${err.message}` : String(err);
+      console.warn("Camera error:", reason);
+      if (step1Status) {
+        if (err && err.name === "NotFoundError") {
+          step1Status.textContent = "⚠️ カメラが認識されていません（画像ファイル選択も使えます）";
+        } else if (err && err.name === "NotAllowedError") {
+          step1Status.textContent = "⚠️ ブラウザのカメラ許可が拒否されています（アドレスバー左の🔒から許可してください）";
+        } else {
+          step1Status.textContent = `⚠️ カメラ起動失敗 (${err.name || "Error"})`;
+        }
+      }
+    }
+  }
+
+  openBtn.addEventListener("click", () => {
+    capturedPhotoBlob = null;
+    recordedAudioBlob = null;
+    if (wizPhotoPreview) wizPhotoPreview.style.display = "none";
+    if (wizVideo) wizVideo.style.display = "block";
+    if (audioPreview) {
+      audioPreview.style.display = "none";
+      audioPreview.removeAttribute("src");
+    }
+    if (recTimer) recTimer.textContent = "0:00";
+    if (step1Status) step1Status.textContent = "";
+    if (step2Status) step2Status.textContent = "";
+    if (submitStatus) submitStatus.textContent = "";
+    goToStep(1);
+    dialog.showModal();
+  });
+
+  function closeWizard() {
+    stopCamera();
+    stopWizAudioRec();
+    if (wizRecStream) {
+      wizRecStream.getTracks().forEach((t) => t.stop());
+      wizRecStream = null;
+    }
+    dialog.close();
+  }
+
+  if (closeBtn) closeBtn.addEventListener("click", closeWizard);
+  dialog.addEventListener("close", () => {
+    stopCamera();
+    stopWizAudioRec();
+  });
+
+  stepPills.forEach((p) => {
+    p.addEventListener("click", () => goToStep(Number(p.dataset.wstep)));
+  });
+
+  if (startCamBtn) startCamBtn.addEventListener("click", () => startCamera());
+  if (camSelect) {
+    camSelect.addEventListener("change", () => {
+      capturedPhotoBlob = null;
+      startCamera(camSelect.value);
+    });
+  }
+
+  if (captureBtn) {
+    captureBtn.addEventListener("click", () => {
+      if (!wizVideo || !wizVideo.videoWidth) return;
+      wizCanvas.width = wizVideo.videoWidth;
+      wizCanvas.height = wizVideo.videoHeight;
+      const ctx = wizCanvas.getContext("2d");
+      // プレビューと同じく左右反転を元に戻して自然向きに保存
+      ctx.save();
+      ctx.translate(wizCanvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(wizVideo, 0, 0, wizCanvas.width, wizCanvas.height);
+      ctx.restore();
+      wizCanvas.toBlob((blob) => {
+        if (!blob) return;
+        capturedPhotoBlob = blob;
+        capturedPhotoName = `capture_${Date.now()}.png`;
+        wizPhotoPreview.src = URL.createObjectURL(blob);
+        wizPhotoPreview.style.display = "block";
+        wizVideo.style.display = "none";
+        retakeBtn.style.display = "inline-flex";
+        captureBtn.disabled = true;
+        stopCamera();
+        if (step1Status) step1Status.textContent = "✓ 写真を撮影しました！";
+      }, "image/png");
+    });
+  }
+
+  if (retakeBtn) {
+    retakeBtn.addEventListener("click", () => {
+      capturedPhotoBlob = null;
+      startCamera();
+    });
+  }
+
+  if (photoFileInput) {
+    photoFileInput.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      capturedPhotoBlob = f;
+      capturedPhotoName = f.name || "photo.png";
+      wizPhotoPreview.src = URL.createObjectURL(f);
+      wizPhotoPreview.style.display = "block";
+      wizVideo.style.display = "none";
+      retakeBtn.style.display = "inline-flex";
+      stopCamera();
+      if (step1Status) step1Status.textContent = `✓ 「${f.name}」を選択しました`;
+    });
+  }
+
+  if (next1Btn) {
+    next1Btn.addEventListener("click", () => {
+      if (!capturedPhotoBlob) {
+        showToast("まず顔写真を撮影（または選択）してください");
+        return;
+      }
+      goToStep(2);
+    });
+  }
+
+  if (recBtn) {
+    recBtn.addEventListener("click", async () => {
+      if (wizMediaRec && wizMediaRec.state === "recording") {
+        stopWizAudioRec();
+        return;
+      }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast("マイクが利用できません。音声ファイルを選択してください。");
+        return;
+      }
+      try {
+        wizRecStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        wizAudioChunks = [];
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+        wizMediaRec = mimeType ? new MediaRecorder(wizRecStream, { mimeType }) : new MediaRecorder(wizRecStream);
+        wizMediaRec.ondataavailable = (ev) => {
+          if (ev.data && ev.data.size > 0) wizAudioChunks.push(ev.data);
+        };
+        wizMediaRec.onstop = () => {
+          if (wizRecStream) {
+            wizRecStream.getTracks().forEach((t) => t.stop());
+            wizRecStream = null;
+          }
+          if (recTimerId) {
+            clearInterval(recTimerId);
+            recTimerId = null;
+          }
+          recBtn.textContent = "🎙️ 録り直す";
+          if (wizAudioChunks.length) {
+            recordedAudioBlob = new Blob(wizAudioChunks, { type: wizMediaRec.mimeType || "audio/webm" });
+            recordedAudioName = `rec_${Date.now()}.webm`;
+            audioPreview.src = URL.createObjectURL(recordedAudioBlob);
+            audioPreview.style.display = "block";
+            if (step2Status) step2Status.textContent = "✓ 音声を録音しました！再生して確認できます";
+          }
+        };
+        recStartMs = Date.now();
+        recTimer.textContent = "0:00";
+        recTimerId = setInterval(() => {
+          const sec = Math.floor((Date.now() - recStartMs) / 1000);
+          recTimer.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+        }, 250);
+        wizMediaRec.start();
+        recBtn.textContent = "⏹️ 録音ストップ";
+        if (step2Status) step2Status.textContent = "🔴 録音中... 10〜20秒ほど話してください";
+      } catch (err) {
+        showToast("マイクを起動できませんでした: " + err.message);
+      }
+    });
+  }
+
+  if (audioFileInput) {
+    audioFileInput.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      recordedAudioBlob = f;
+      recordedAudioName = f.name || "voice.wav";
+      audioPreview.src = URL.createObjectURL(f);
+      audioPreview.style.display = "block";
+      if (step2Status) step2Status.textContent = `✓ 「${f.name}」を選択しました`;
+    });
+  }
+
+  if (back2Btn) back2Btn.addEventListener("click", () => goToStep(1));
+  if (next2Btn) {
+    next2Btn.addEventListener("click", () => {
+      if (wizMediaRec && wizMediaRec.state === "recording") {
+        showToast("録音を停止してから次へ進んでください");
+        return;
+      }
+      if (!recordedAudioBlob) {
+        showToast("まず声を録音（または音声ファイルを選択）してください");
+        return;
+      }
+      goToStep(3);
+    });
+  }
+
+  if (back3Btn) back3Btn.addEventListener("click", () => goToStep(2));
+
+  if (submitBtn) {
+    submitBtn.addEventListener("click", async () => {
+      const nameVal = ($("wiz-name") ? $("wiz-name").value : "").trim();
+      if (!nameVal) {
+        showToast("お名前を入力してください");
+        if ($("wiz-name")) $("wiz-name").focus();
+        return;
+      }
+      if (!capturedPhotoBlob) {
+        showToast("Step 1 の顔写真が未撮影です");
+        goToStep(1);
+        return;
+      }
+      if (!recordedAudioBlob) {
+        showToast("Step 2 の音声が未録音です");
+        goToStep(2);
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append("photo", capturedPhotoBlob, capturedPhotoName);
+      fd.append("audio", recordedAudioBlob, recordedAudioName);
+      fd.append("name", nameVal);
+      fd.append("nickname", ($("wiz-nickname") ? $("wiz-nickname").value : "").trim());
+      fd.append("first_person", $("wiz-first-person") ? $("wiz-first-person").value : "私");
+      fd.append("tone", $("wiz-tone") ? $("wiz-tone").value : "");
+      fd.append("personality", ($("wiz-personality") ? $("wiz-personality").value : "").trim());
+      fd.append("favorites", ($("wiz-favorites") ? $("wiz-favorites").value : "").trim());
+      fd.append("catchphrase", ($("wiz-catchphrase") ? $("wiz-catchphrase").value : "").trim());
+      fd.append("holiday", ($("wiz-holiday") ? $("wiz-holiday").value : "").trim());
+
+      submitBtn.disabled = true;
+      submitBtn.classList.add("is-loading");
+      if (submitStatus) submitStatus.textContent = "⏳ 音声クローン作成＆人格・待機映像を生成中...";
+
+      try {
+        const res = await fetch("/api/wizard/create", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "作成に失敗しました");
+
+        currentPersonaId = data.persona.id;
+        localStorage.setItem("mirai-voice:current-persona", currentPersonaId);
+        localStorage.setItem(STORAGE_KEY, data.voice_name);
+
+        await loadAvatarSources();
+        await loadVoices();
+        await loadPersonas();
+
+        if (els.voice) els.voice.value = data.voice_name;
+        if (els.avatarSourceSelect) els.avatarSourceSelect.value = data.avatar;
+        if (els.mainAvatarImg) els.mainAvatarImg.src = `/avatars/${encodeURIComponent(data.avatar)}`;
+        setMainIdleVideo(data.state ? (data.state.idle_video_urls || data.state.idle_video_url) : null);
+        if (avatarBC && data.state) {
+          avatarBC.postMessage({ type: "state_update", state: data.state });
+        }
+
+        closeWizard();
+        showToast(`🎉 「${data.persona.name}」の分身AIが完成しました！待機映像も自動で準備されます`);
+      } catch (err) {
+        if (submitStatus) submitStatus.textContent = `❌ ${err.message}`;
+        showToast(err.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove("is-loading");
+      }
+    });
+  }
+})();
 
 
 /* ---------- イベントリスナー ---------- */
@@ -1568,7 +2825,10 @@ els.ttsText.addEventListener("keydown", (e) => {
 els.speakBtn.addEventListener("click", speakTts);
 
 els.speed.addEventListener("input", updateSpeed);
-els.voice.addEventListener("change", () => localStorage.setItem(STORAGE_KEY, els.voice.value));
+els.voice.addEventListener("change", () => {
+  localStorage.setItem(STORAGE_KEY, els.voice.value);
+  syncAvatarWithVoice(els.voice.value);
+});
 els.playBtn.addEventListener("click", togglePlay);
 els.clearHistory.addEventListener("click", clearHistory);
 window.addEventListener("resize", resizeCanvas);
@@ -1581,7 +2841,8 @@ setRangeFill(els.seek);
 resizeCanvas();
 requestAnimationFrame(draw);
 loadConfig();
-loadVoices();
+loadLlmStatus();
+loadAvatarSources().then(() => loadVoices());
 loadPersonas();
 loadLineStatus();
 els.chatInput.focus();

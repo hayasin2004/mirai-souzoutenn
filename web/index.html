@@ -34,7 +34,16 @@
         <button id="add-persona-btn" class="btn-subtle btn-add-persona" type="button" title="新しい人物のAIを作成">
           ＋ 新規AI
         </button>
+        <button id="open-wizard-btn" class="btn-subtle" type="button" style="border-color: var(--accent-1); color: #e9d5ff; background: rgba(155, 109, 255, 0.16);" title="写真撮影・音声録音・アンケートで分身AIを一括作成">
+          🚀 かんたん分身AI作成
+        </button>
       </div>
+      <button id="open-avatar-win-btn" class="btn-subtle" type="button" style="border-color: var(--accent-2); color: var(--accent-2);" title="映像だけを映す専用ウィンドウを別画面で開きます">
+        🎬 映像画面を別ウィンドウで開く
+      </button>
+      <button id="toggle-chat-only-btn" class="btn-subtle" type="button" title="チャット画面だけを大きく映すモードに切り替えます">
+        💬 チャットのみ表示
+      </button>
       <button id="persona-btn" class="btn-subtle" type="button">
         ⚙ 人格設定
       </button>
@@ -90,16 +99,46 @@
           </div>
         </div>
 
-        <div class="chat-options-bar">
-          <label class="toggle-label" title="ONにすると返答時に自動で音声を生成します（混雑時は数秒かかります）">
-            <input id="enable-tts-toggle" type="checkbox">
-            <span class="toggle-text">🔊 音声も自動生成する</span>
-          </label>
-          <span class="mode-badge-hint">⚡ OFFなら1秒で爆速返答！</span>
+        <div class="chat-options-bar" style="flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+            <label class="toggle-label" title="ONにすると返答時に自動で音声を生成します">
+              <input id="enable-tts-toggle" type="checkbox" checked>
+              <span class="toggle-text">🔊 音声を自動生成</span>
+            </label>
+            <label class="toggle-label" title="ONにするとチャットが出た後にDittoで口パク映像を生成して流します">
+              <input id="enable-avatar-video-toggle" type="checkbox" checked>
+              <span class="toggle-text">🎬 アバター映像で発話（チャット表示後に映像再生）</span>
+            </label>
+            <label class="toggle-label" title="ONにするとマイクで話し終えたあと自動で送信します">
+              <input id="auto-send-voice-toggle" type="checkbox" checked>
+              <span class="toggle-text">🎙️ 音声で自動送信</span>
+            </label>
+            <label class="toggle-label" style="gap: 6px;" title="会話AIのエンジンを切り替え（ローカルLLMはOllama使用）">
+              <span class="toggle-text">🧠 AI:</span>
+              <select id="llm-provider-select" style="font-size: 0.78rem; padding: 3px 8px; border-radius: 6px;">
+                <option value="gemini">☁️ Gemini (クラウド)</option>
+                <option value="ollama">💻 ローカルLLM (Ollama)</option>
+              </select>
+            </label>
+            <select id="local-model-select" style="display: none; font-size: 0.78rem; padding: 3px 8px; border-radius: 6px; max-width: 170px;" title="使用するローカルLLMモデル"></select>
+            <label class="toggle-label" style="gap: 6px;" title="音声クローン合成エンジンを切り替え">
+              <span class="toggle-text">🔊 声生成:</span>
+              <select id="tts-provider-select" style="font-size: 0.78rem; padding: 3px 8px; border-radius: 6px;">
+                <option value="fish">🐟 Fish Audio</option>
+                <option value="gemini-lite">✨ Gemini 3.8 Lite TTS</option>
+                <option value="gemini-flash">💎 Gemini 3.8 Flash TTS</option>
+                <option value="local">💻 ローカルTTS (オフライン)</option>
+              </select>
+            </label>
+          </div>
+          <span class="mode-badge-hint">✨ 別画面の「映像画面」ともリアルタイム連動！</span>
         </div>
 
         <div class="chat-input-bar">
-          <textarea id="chat-input" rows="2" placeholder="メッセージを入力... (Enterで送信、Shift+Enterで改行)"></textarea>
+          <button id="mic-btn" class="btn-mic" type="button" title="マイクで音声入力（クリックで開始/停止）" aria-label="音声入力">
+            🎤
+          </button>
+          <textarea id="chat-input" rows="2" placeholder="メッセージを入力、または🎤ボタンで話しかける... (Enterで送信)"></textarea>
           <button id="send-chat-btn" class="btn-primary" type="button">
             <span class="btn-spinner" aria-hidden="true"></span>
             <span class="btn-label">話す</span>
@@ -247,10 +286,32 @@
       </div>
     </section>
 
-    <!-- 右上: 音声プレイヤー -->
+    <!-- 右上: アバター映像 & 音声プレイヤー -->
     <section class="card player" aria-labelledby="player-title">
-      <h2 id="player-title" class="card-title">リアルタイム音声再生</h2>
-      <div class="visualizer-wrap">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+        <h2 id="player-title" class="card-title" style="margin: 0;">アバター映像 &amp; 音声再生</h2>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <select id="avatar-source-select" style="padding: 4px 26px 4px 10px; font-size: 0.78rem; width: auto;" title="動かす顔画像を選択"></select>
+          <label class="btn-subtle" style="padding: 4px 10px; font-size: 0.75rem; cursor: pointer;" title="新しい顔画像をアップロード">
+            📷 顔変更
+            <input type="file" id="avatar-upload-input" accept="image/*,video/mp4" style="display: none;">
+          </label>
+          <button id="popout-avatar-btn" class="btn-subtle" type="button" style="padding: 4px 10px; font-size: 0.75rem; border-color: var(--accent-2); color: var(--accent-2);" title="映像だけを別ウィンドウで開く">
+            ↗ 別画面で開く
+          </button>
+        </div>
+      </div>
+
+      <div id="avatar-preview-box" style="position: relative; width: 100%; height: 240px; border-radius: var(--radius-md); background: #070913; border: 1px solid var(--border); overflow: hidden; margin-bottom: 12px; display: flex; align-items: center; justify-content: center;">
+        <img id="main-avatar-img" src="/avatars/AbeHiroshi.jpg" alt="Avatar" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+        <video id="main-avatar-idle-video" loop muted autoplay playsinline style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; background: #070913;"></video>
+        <video id="main-avatar-video" playsinline style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; pointer-events: none; transition: opacity 0.22s ease; background: #070913; z-index: 2;"></video>
+        <div id="avatar-gen-badge" style="display: none; position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(15, 20, 40, 0.88); border: 1px solid var(--accent-2); padding: 6px 14px; border-radius: 999px; font-size: 0.78rem; color: #fff; white-space: nowrap; z-index: 3;">
+          ⏳ リップシンク映像を生成中...
+        </div>
+      </div>
+
+      <div class="visualizer-wrap" style="height: 80px;">
         <canvas id="visualizer" aria-hidden="true"></canvas>
         <p id="now-playing" class="now-playing">メッセージを送信するか文章を読み上げてください</p>
       </div>
@@ -341,7 +402,18 @@
               <span class="field-label">音声の書き起こしテキスト（任意・発音精度が向上）</span>
               <input type="text" id="clone-ref-text" placeholder="例: こんにちは、市川拓です。よろしくお願いします。">
             </label>
+            <label class="form-field">
+              <span class="field-label">紐付ける顔画像（登録済みから選択）</span>
+              <select id="clone-avatar-select">
+                <option value="">（指定なし / 現在の画像）</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span class="field-label">または新しい顔画像をアップロード</span>
+              <input type="file" id="clone-avatar-file" accept="image/*">
+            </label>
           </div>
+          <p class="form-hint" style="margin-top: 6px; font-size: 0.78rem;">※ 画像を設定すると、声の登録と同時に待機用の瞬き映像を自動生成します。</p>
           <div class="dialog-actions">
             <span id="clone-status" class="persona-status"></span>
             <button id="submit-clone-btn" class="btn-primary" type="submit">
@@ -363,7 +435,18 @@
               <span class="field-label">Fish Audio Reference ID (32桁) *</span>
               <input type="text" id="link-voice-id" placeholder="例: 216ae90651fd45f58de1262710b67474" required>
             </label>
+            <label class="form-field">
+              <span class="field-label">紐付ける顔画像（登録済みから選択）</span>
+              <select id="link-avatar-select">
+                <option value="">（指定なし / 現在の画像）</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span class="field-label">または新しい顔画像をアップロード</span>
+              <input type="file" id="link-avatar-file" accept="image/*">
+            </label>
           </div>
+          <p class="form-hint" style="margin-top: 6px; font-size: 0.78rem;">※ 画像を設定すると、声の登録と同時に待機用の瞬き映像を自動生成します。</p>
           <div class="dialog-actions">
             <span id="link-status" class="persona-status"></span>
             <button id="submit-link-btn" class="btn-primary" type="submit">
@@ -431,6 +514,130 @@
           </button>
         </div>
       </form>
+    </div>
+  </dialog>
+
+  <!-- 一気通貫 分身AI作成ウィザード（写真撮影・音声録音・アンケート） -->
+  <dialog id="wizard-dialog" class="dialog">
+    <div class="dialog-content voice-dialog-content" style="max-width: 680px;">
+      <div class="dialog-header">
+        <h3>🚀 分身AI かんたん一括作成（撮影・録音・アンケート）</h3>
+        <button id="close-wizard-btn" class="btn-close" type="button" aria-label="閉じる">×</button>
+      </div>
+
+      <div class="wizard-steps-bar">
+        <button type="button" class="wstep-pill is-active" data-wstep="1">1. 📷 写真撮影</button>
+        <span class="wstep-arrow">→</span>
+        <button type="button" class="wstep-pill" data-wstep="2">2. 🎙️ 音声録音</button>
+        <span class="wstep-arrow">→</span>
+        <button type="button" class="wstep-pill" data-wstep="3">3. 📝 人格アンケート</button>
+      </div>
+
+      <!-- Step 1: 写真撮影 -->
+      <div id="wizard-step-1" class="wizard-panel">
+        <p class="form-hint">正面を向いて明るい場所で撮影してください（メガネや前髪がかからないようにすると自然になります）。</p>
+        <div class="wizard-camera-box">
+          <video id="wiz-video" autoplay playsinline muted></video>
+          <img id="wiz-photo-preview" alt="撮影プレビュー" style="display: none;">
+          <canvas id="wiz-canvas" style="display: none;"></canvas>
+        </div>
+        <div class="wizard-controls-row">
+          <select id="wiz-camera-select" style="font-size: 0.82rem; padding: 5px 10px; border-radius: 6px; max-width: 240px;" title="使用するカメラを選択">
+            <option value="">📷 カメラを自動選択</option>
+          </select>
+          <button id="wiz-start-cam-btn" class="btn-subtle" type="button">📷 カメラ起動</button>
+          <button id="wiz-capture-btn" class="btn-primary" type="button" disabled>📸 撮影する</button>
+          <button id="wiz-retake-btn" class="btn-subtle" type="button" style="display: none;">🔄 撮り直す</button>
+          <label class="btn-subtle" style="cursor: pointer;">
+            📁 画像ファイルを選ぶ
+            <input type="file" id="wiz-photo-file" accept="image/*" style="display: none;">
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <span id="wiz-step1-status" class="persona-status"></span>
+          <button id="wiz-next-1-btn" class="btn-primary" type="button">次へ（音声録音） →</button>
+        </div>
+      </div>
+
+      <!-- Step 2: 音声録音 -->
+      <div id="wizard-step-2" class="wizard-panel is-hidden">
+        <p class="form-hint">下の台本をそのまま読むか、10〜20秒ほど自然な声で話してください。</p>
+        <div class="wizard-script-box">
+          「こんにちは！今日は来てくれてありがとう。普段は好きなことをしたり、おいしいものを食べたりして過ごしてるよ。なんでも気軽に話しかけてね！」
+        </div>
+        <div class="wizard-controls-row" style="justify-content: center; margin: 14px 0;">
+          <button id="wiz-rec-btn" class="btn-primary" type="button">🎙️ 録音スタート</button>
+          <span id="wiz-rec-timer" style="font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.05rem; min-width: 54px; text-align: center;">0:00</span>
+          <label class="btn-subtle" style="cursor: pointer;">
+            📁 音声ファイルを選ぶ
+            <input type="file" id="wiz-audio-file" accept="audio/*" style="display: none;">
+          </label>
+        </div>
+        <audio id="wiz-audio-preview" controls style="width: 100%; display: none; margin-bottom: 10px;"></audio>
+        <div class="dialog-actions">
+          <button id="wiz-back-2-btn" class="btn-subtle" type="button">← 戻る</button>
+          <span id="wiz-step2-status" class="persona-status"></span>
+          <button id="wiz-next-2-btn" class="btn-primary" type="button">次へ（アンケート） →</button>
+        </div>
+      </div>
+
+      <!-- Step 3: 人格アンケート -->
+      <div id="wizard-step-3" class="wizard-panel is-hidden">
+        <p class="form-hint">簡単なアンケートに答えると、あなたの話し方や性格をAIに学習させます。</p>
+        <div class="form-grid">
+          <label class="form-field">
+            <span class="field-label">お名前 *</span>
+            <input type="text" id="wiz-name" placeholder="例: 山田 太郎" required>
+          </label>
+          <label class="form-field">
+            <span class="field-label">呼ばれ方（ニックネーム）</span>
+            <input type="text" id="wiz-nickname" placeholder="例: たろう、やまちゃん">
+          </label>
+          <label class="form-field">
+            <span class="field-label">一人称</span>
+            <select id="wiz-first-person">
+              <option value="俺">俺</option>
+              <option value="僕">僕</option>
+              <option value="私">私</option>
+              <option value="うち">うち</option>
+              <option value="自分">自分</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span class="field-label">普段の話し方・口調</span>
+            <select id="wiz-tone">
+              <option value="フレンドリーで親しみやすいタメ口">タメ口・フレンドリー</option>
+              <option value="丁寧でやわらかい敬語">丁寧・敬語</option>
+              <option value="明るく元気でハイテンション">元気・ハイテンション</option>
+              <option value="落ち着いていてクール・マイペース">落ち着き・クール</option>
+            </select>
+          </label>
+          <label class="form-field form-full">
+            <span class="field-label">性格・特徴</span>
+            <input type="text" id="wiz-personality" placeholder="例: 好奇心旺盛でよく笑う、ちょっとマイペース">
+          </label>
+          <label class="form-field form-full">
+            <span class="field-label">好きなこと・趣味・好きな食べ物</span>
+            <input type="text" id="wiz-favorites" placeholder="例: ラーメン、サウナ、ゲーム、映画鑑賞">
+          </label>
+          <label class="form-field">
+            <span class="field-label">よく使う口癖・語尾（任意）</span>
+            <input type="text" id="wiz-catchphrase" placeholder="例: 〜だね、マジで、なるほど">
+          </label>
+          <label class="form-field">
+            <span class="field-label">休日の過ごし方・マイブーム（任意）</span>
+            <input type="text" id="wiz-holiday" placeholder="例: カフェ巡り、友達とドライブ">
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button id="wiz-back-3-btn" class="btn-subtle" type="button">← 戻る</button>
+          <span id="wiz-submit-status" class="persona-status"></span>
+          <button id="wiz-submit-btn" class="btn-primary" type="button">
+            <span class="btn-spinner" aria-hidden="true"></span>
+            <span class="btn-label">🚀 分身AIを一括作成！</span>
+          </button>
+        </div>
+      </div>
     </div>
   </dialog>
 

@@ -607,8 +607,9 @@ def generate_proactive_question(
     )
 
     client = genai.Client(api_key=gemini_api_key)
+    models_to_try = ["gemini-3.5-flash-lite", "gemini-flash-latest"]
 
-    for model_name in ["gemini-3.5-flash-lite", "gemini-flash-latest"]:
+    for model_name in models_to_try:
         try:
             resp = client.models.generate_content(
                 model=model_name,
@@ -742,9 +743,10 @@ def generate_interview_reply(user_message: str, user_id: str, gemini_api_key: st
     contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_message)]))
 
     client = genai.Client(api_key=gemini_api_key)
+    models_to_try = ["gemini-3.5-flash-lite", "gemini-flash-latest"]
 
     # 最速モデルで即座に返信
-    for model_name in ["gemini-3.5-flash-lite", "gemini-flash-latest"]:
+    for model_name in models_to_try:
         try:
             resp = client.models.generate_content(
                 model=model_name,
@@ -811,9 +813,10 @@ def update_persona_from_logs(gemini_api_key: str, person_id: str = "taku") -> Di
     )
 
     client = genai.Client(api_key=gemini_api_key)
+    models_to_try = ["gemini-3.5-flash-lite", "gemini-flash-latest"]
     updated_persona_text = ""
 
-    for model_name in ["gemini-3.5-flash-lite", "gemini-flash-latest"]:
+    for model_name in models_to_try:
         try:
             resp = client.models.generate_content(
                 model=model_name,
@@ -958,9 +961,10 @@ def import_line_chat_history(raw_text: str, gemini_api_key: str, auto_learn: boo
     )
 
     client = genai.Client(api_key=gemini_api_key)
+    models_to_try = ["gemini-3.5-flash-lite", "gemini-flash-latest"]
     json_text = ""
 
-    for model_name in ["gemini-3.5-flash-lite", "gemini-flash-latest"]:
+    for model_name in models_to_try:
         try:
             resp = client.models.generate_content(
                 model=model_name,
